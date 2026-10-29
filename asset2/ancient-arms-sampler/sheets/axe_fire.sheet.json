@@ -1,0 +1,130 @@
+{
+  "image": "axe_fire.png",
+  "imageSize": [
+    74,
+    176
+  ],
+  "padding": 2,
+  "sprites": [
+    {
+      "name": "fire_0",
+      "rect": [
+        2,
+        118,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_1",
+      "rect": [
+        26,
+        118,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_2",
+      "rect": [
+        50,
+        118,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_3",
+      "rect": [
+        2,
+        60,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_4",
+      "rect": [
+        26,
+        60,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_5",
+      "rect": [
+        50,
+        60,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_6",
+      "rect": [
+        2,
+        2,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "fire_7",
+      "rect": [
+        26,
+        2,
+        22,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    }
+  ],
+  "version": 1,
+  "generator": "kritapack",
+  "source": "axe-fire-c9c2kqtk",
+  "clip": "fire",
+  "fps": 14.0,
+  "loop": true,
+  "pixelsPerUnit": 16,
+  "cell": [
+    22,
+    56
+  ],
+  "pivot": [
+    0.5,
+    0.5
+  ],
+  "mode": "sheet"
+}

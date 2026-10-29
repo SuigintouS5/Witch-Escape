@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head><title>Sprite Sheet Test</title>
+<style>
+body{background:#1a1a24;color:#eee;font-family:sans-serif;padding:24px;}
+canvas{border:2px solid #ff4d6d;margin:8px;image-rendering:pixelated;background:rgba(0,0,0,0.4);border-radius:6px;}
+.card{background:#232738;padding:16px;border-radius:8px;margin-bottom:20px;}
+h3{margin-top:0;color:#ffd166;}
+</style>
+</head>
+<body>
+<h2>Kiểm Tra Cắt Khung Hoàn Chỉnh (Pixel-Perfect Bounding Box)</h2>
+
+<div class="card">
+  <h3>1. Blood Monster (Zombie Rừng Đêm) - Tự động phóng to 3x và 4x</h3>
+  <div id="bm_tight"></div>
+</div>
+
+<div class="card">
+  <h3>2. Demon (Bộ Xương Tà Ác) - Tự động phóng to 3x và 4x</h3>
+  <div id="dm_tight"></div>
+</div>
+
+<script>
+function showTightSheet(containerId, src, frameW, frameH, numFrames) {
+  const container = document.getElementById(containerId);
+  const img = new Image();
+  img.onload = () => {
+    // Show 8 frames scaled up
+    const div = document.createElement('div');
+    for (let f = 0; f < numFrames; f++) {
+      const c = document.createElement('canvas');
+      c.width = frameW * 3;
+      c.height = frameH * 3;
+      const ctx = c.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, f * frameW, 0, frameW, frameH, 0, 0, c.width, c.height);
+      div.appendChild(c);
+    }
+    container.appendChild(div);
+
+    // Live animation preview
+    const animTitle = document.createElement('h4');
+    animTitle.textContent = 'Hoạt ảnh chạy thực tế (Live Animation Preview):';
+    container.appendChild(animTitle);
+
+    const animCanvas = document.createElement('canvas');
+    animCanvas.width = 64;
+    animCanvas.height = 64;
+    container.appendChild(animCanvas);
+    const actx = animCanvas.getContext('2d');
+    actx.imageSmoothingEnabled = false;
+
+    let frame = 0;
+    setInterval(() => {
+      actx.clearRect(0, 0, 64, 64);
+      actx.drawImage(img, frame * frameW, 0, frameW, frameH, 8, 8, 48, 48);
+      frame = (frame + 1) % numFrames;
+    }, 110);
+  };
+  img.src = src;
+}
+
+showTightSheet('bm_tight', 'assets/enemies/blood_monster_tight.png', 24, 24, 8);
+showTightSheet('dm_tight', 'assets/enemies/demon_tight.png', 26, 26, 8);
+</script>
+</body>
+</html>

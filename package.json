@@ -1,0 +1,13 @@
+{
+  "name": "vampire-survival-2d",
+  "version": "1.0.0",
+  "description": "Vampire Survival 2D Mini Project for Cloud Computing course",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve -l 3000 .",
+    "dev": "node server.js"
+  },
+  "keywords": ["game", "cloud-computing", "vampire-survivor", "canvas-2d"],
+  "author": "",
+  "license": "MIT"
+}
