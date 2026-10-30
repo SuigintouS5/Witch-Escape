@@ -1,28 +1,60 @@
 import { CONFIG } from './config.js';
 
 export class Player {
-  constructor(startX, startY, charConfig = null, metaBonuses = null) {
+  constructor(startX, startY, charConfig = null, metaBonuses = null, challengeModifiers = {}, masteryBonuses = null) {
     this.x = startX;
     this.y = startY;
 
     const char = charConfig || CONFIG.CHARACTERS[0] || CONFIG.PLAYER;
     this.charConfig = char;
+    this.challenges = challengeModifiers || {};
+    this.masteryBonuses = masteryBonuses || {};
 
     this.width = char.width || CONFIG.PLAYER.WIDTH;
     this.height = char.height || CONFIG.PLAYER.HEIGHT;
 
-    // Chỉ số cơ bản có cộng bonus từ Meta Upgrades
-    const bonusHp = metaBonuses ? metaBonuses.bonusHealth : 0;
-    const speedMult = metaBonuses ? metaBonuses.bonusSpeedMult : 1.0;
-    const bonusCrit = metaBonuses ? metaBonuses.bonusCritChance : 0;
+    // Chỉ số cơ bản có cộng bonus từ Meta Upgrades & Thông Thạo (Mastery)
+    const bonusHp = (metaBonuses ? metaBonuses.bonusHealth : 0) + (this.masteryBonuses.bonusHealth || 0);
+    const speedMult = (metaBonuses ? metaBonuses.bonusSpeedMult : 1.0) * (this.masteryBonuses.bonusSpeedMult || 1.0);
+    const bonusCrit = (metaBonuses ? metaBonuses.bonusCritChance : 0) + (this.masteryBonuses.bonusCritChance || 0);
 
-    this.speed = (char.baseSpeed || CONFIG.PLAYER.BASE_SPEED) * speedMult;
-    this.maxHealth = (char.maxHealth || CONFIG.PLAYER.MAX_HEALTH) + bonusHp;
+    let calcSpeed = (char.baseSpeed || CONFIG.PLAYER.BASE_SPEED) * speedMult;
+    let calcHp = (char.maxHealth || CONFIG.PLAYER.MAX_HEALTH) + bonusHp;
+
+    // Áp dụng Thử Thách (Challenge Modifiers)
+    if (this.challenges.less_speed) {
+      calcSpeed *= 0.60; // Giảm 40% tốc độ
+    }
+    if (this.challenges.less_health) {
+      calcHp = Math.max(1, Math.round(calcHp * 0.50)); // Giảm 50% máu
+    }
+    if (this.challenges.one_hit_death) {
+      calcHp = 1; // Chỉ có đúng 1 máu
+    }
+
+    this.speed = calcSpeed;
+    this.maxHealth = calcHp;
     this.health = this.maxHealth;
+
+    this.noHeal = !!this.challenges.no_heal;
+    this.lessDamage = !!this.challenges.less_damage;
+    this.moreIncomingDamage = !!this.challenges.more_incoming_damage;
+
+    // Thông số bổ trợ từ Thông Thạo (Mastery)
+    this.damageReduction = this.masteryBonuses.damageReduction || 0;
+    this.lifesteal = this.masteryBonuses.lifesteal || 0;
+    this.masteryRegen = this.masteryBonuses.bonusRegen || 0;
+    this.masteryDmgMult = 1.0 + (this.masteryBonuses.bonusDamageMult || 0);
+    this.pickupRangeBonus = this.masteryBonuses.bonusPickupRange || 0;
+    this.specialMasteryLevel = this.masteryBonuses.specialMasteryLevel || 0;
+
+    // Debuff slow
+    this.slowTimer = 0;
+    this.slowMult = 1.0;
 
     // Chỉ số Chí Mạng (Crit System)
     this.critChance = (char.critChance || CONFIG.PLAYER.BASE_CRIT_CHANCE) + bonusCrit;
-    this.critDamage = char.critDamage || CONFIG.PLAYER.BASE_CRIT_DAMAGE; // 200% (gấp đôi)
+    this.critDamage = (char.critDamage || CONFIG.PLAYER.BASE_CRIT_DAMAGE) + (this.masteryBonuses.bonusCritDamage || 0);
 
     this.invincibilityTimer = 0;
     this.isDead = false;
@@ -46,6 +78,63 @@ export class Player {
 
     this.walkCycle = 0;
     this.hitFlashTimer = 0;
+
+    // Hệ thống Phù Thủy (Witch System)
+    this.isWitch = false;
+    this.hasWitchForm = !!char.witchSprite;
+    this.witchSpriteSrc = char.witchSprite || null;
+    this.witchKillRequirement = char.witchKillRequirement || 100;
+    this.witchDmgMult = 1.0;
+    this.witchAuraAngle = 0;
+
+    // Tải trước ảnh Witch Form nếu có
+    this.witchSprite = null;
+    this.witchSpriteLoaded = false;
+    if (this.witchSpriteSrc) {
+      this.witchSprite = new Image();
+      this.witchSprite.src = this.witchSpriteSrc;
+      this.witchSprite.onload = () => {
+        this.witchSpriteLoaded = true;
+      };
+    }
+  }
+
+  // Thức tỉnh hình thái Phù Thủy vĩnh viễn
+  awakenWitchForm() {
+    if (this.isWitch || !this.hasWitchForm) return false;
+    this.isWitch = true;
+
+    // Chỉ số tăng vĩnh viễn (Cân bằng cho dạng vĩnh viễn)
+    this.maxHealth += 50;
+    this.health = this.maxHealth; // Hồi đầy máu khi thức tỉnh
+
+    this.speed *= 1.20; // +20% Tốc độ chạy
+    this.critChance += 0.10; // +10% Tỉ lệ chí mạng
+    this.critDamage += 0.30; // +30% Sát thương chí mạng (ví dụ 2.0 -> 2.3)
+    this.witchDmgMult = 1.30; // +30% Sát thương toàn vũ khí
+
+    // Chuyển sang sprite Witch Form (hiro1.png)
+    if (this.witchSprite) {
+      this.sprite = this.witchSprite;
+      this.spriteLoaded = this.witchSpriteLoaded;
+    }
+    return true;
+  }
+
+  // Áp dụng Debuff
+  applyDebuff(type, value, duration) {
+    if (type === 'slow') {
+      this.slowMult = Math.max(0.2, 1.0 - value);
+      this.slowTimer = duration;
+    }
+  }
+
+  // Hồi máu (có kiểm tra thử thách Không Hồi Máu)
+  heal(amount) {
+    if (this.isDead || this.noHeal) return 0;
+    const oldHp = this.health;
+    this.health = Math.min(this.maxHealth, this.health + amount);
+    return this.health - oldHp;
   }
 
   // Bán kính va chạm với quái
@@ -56,11 +145,23 @@ export class Player {
   takeDamage(amount) {
     if (this.isDead || this.invincibilityTimer > 0) return false;
 
-    this.health = Math.max(0, this.health - amount);
+    // Giảm sát thương nhận vào từ Thông Thạo Giáp Ma Cổ Đại
+    let finalAmount = amount;
+    if (this.damageReduction > 0) {
+      finalAmount *= Math.max(0.15, 1.0 - this.damageReduction);
+    }
+
+    // Chịu thêm 50% dmg nếu có thử thách
+    if (this.moreIncomingDamage) {
+      finalAmount *= 1.5;
+    }
+
+    this.health = Math.max(0, this.health - finalAmount);
     this.invincibilityTimer = CONFIG.PLAYER.INVINCIBILITY_DURATION;
     this.hitFlashTimer = 0.18; // Chớp đỏ 0.18s
 
     if (this.health <= 0) {
+      this.health = 0;
       this.isDead = true;
     }
 
@@ -70,6 +171,11 @@ export class Player {
   update(delta, input) {
     if (this.isDead) return;
 
+    // Hồi máu liên tục từ Thông Thạo Huyết Mạch Tái Sinh
+    if (this.masteryRegen > 0 && !this.noHeal && this.health < this.maxHealth) {
+      this.heal(this.masteryRegen * delta);
+    }
+
     // Giảm thời gian bất tử
     if (this.invincibilityTimer > 0) {
       this.invincibilityTimer -= delta;
@@ -78,12 +184,22 @@ export class Player {
       this.hitFlashTimer -= delta;
     }
 
+    // Debuff slow timer
+    if (this.slowTimer > 0) {
+      this.slowTimer -= delta;
+      if (this.slowTimer <= 0) {
+        this.slowMult = 1.0;
+      }
+    }
+
     const move = input.getMovementVector();
     this.isMoving = (move.x !== 0 || move.y !== 0);
 
+    const effSpeed = this.speed * this.slowMult;
+
     if (this.isMoving) {
-      this.x += move.x * this.speed * delta;
-      this.y += move.y * this.speed * delta;
+      this.x += move.x * effSpeed * delta;
+      this.y += move.y * effSpeed * delta;
 
       if (move.x > 0) this.facing = 'right';
       else if (move.x < 0) this.facing = 'left';
@@ -100,10 +216,30 @@ export class Player {
     this.y = Math.max(halfH, Math.min(this.y, CONFIG.WORLD_HEIGHT - halfH));
   }
 
-  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng
+  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng & bổ trợ Thông Thạo
   rollDamage(baseDmg) {
+    let calcDmg = baseDmg * (this.masteryDmgMult || 1.0);
+
+    // Kỹ năng Tinh Hoa Thông Thạo của Hắc Kiếm Sĩ: Đứng yên tăng thêm 20% sát thương
+    if (this.charConfig && this.charConfig.id === 'dark_knight' && this.specialMasteryLevel > 0 && !this.isMoving) {
+      calcDmg *= 1.20;
+    }
+
+    if (this.lessDamage) {
+      calcDmg *= 0.5; // Giảm 50% dmg nếu có thử thách
+    }
+
     const isCrit = Math.random() < this.critChance;
-    const finalDamage = isCrit ? Math.round(baseDmg * this.critDamage) : Math.round(baseDmg);
+    const finalDamage = isCrit ? Math.round(calcDmg * this.critDamage) : Math.round(calcDmg);
+
+    // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo (Hấp Huyết Ma Pháp)
+    if (this.lifesteal > 0 && !this.noHeal && !this.isDead && this.health < this.maxHealth) {
+      const healed = finalDamage * this.lifesteal;
+      if (healed >= 0.5) {
+        this.heal(healed);
+      }
+    }
+
     return { damage: finalDamage, isCrit };
   }
 
@@ -118,6 +254,29 @@ export class Player {
     ctx.beginPath();
     ctx.ellipse(screenPos.x, screenPos.y + this.height * 0.42, this.width * 0.45, 12, 0, 0, Math.PI * 2);
     ctx.fill();
+
+    // 1.5. Hào quang ma thuật xoay dưới chân khi ở dạng Witch Form
+    if (this.isWitch) {
+      this.witchAuraAngle += 0.035;
+      ctx.save();
+      ctx.translate(screenPos.x, screenPos.y + this.height * 0.2);
+      ctx.rotate(this.witchAuraAngle);
+
+      const auraGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, this.width * 0.95);
+      auraGrad.addColorStop(0, 'rgba(192, 38, 211, 0.45)');
+      auraGrad.addColorStop(0.65, 'rgba(124, 58, 237, 0.25)');
+      auraGrad.addColorStop(1, 'rgba(88, 28, 135, 0.0)');
+      ctx.fillStyle = auraGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.width * 0.95, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Vòng tròn ma trận phép thuật
+      ctx.strokeStyle = 'rgba(236, 72, 153, 0.55)';
+      ctx.lineWidth = 1.8;
+      ctx.strokeRect(-this.width * 0.5, -this.width * 0.5, this.width, this.width);
+      ctx.restore();
+    }
 
     // 2. Hiệu ứng nhấp nhô khi bước đi
     const bobbing = this.isMoving ? Math.sin(this.walkCycle) * 3 : 0;
@@ -140,6 +299,11 @@ export class Player {
     }
 
     if (this.spriteLoaded) {
+      // Đối với ảnh vẽ nhân vật chi tiết (như hiro.png và hiro1.png), bật smoothing để ảnh hiển thị mượt mà
+      if (!this.charConfig || !this.charConfig.spriteSheet) {
+        ctx.imageSmoothingEnabled = true;
+      }
+
       if (this.charConfig && this.charConfig.spriteSheet) {
         const ss = this.charConfig.spriteSheet;
         const totalFrames = ss.cols * ss.rows;
@@ -154,12 +318,19 @@ export class Player {
           -this.width / 2, -this.height / 2, this.width, this.height
         );
       } else {
+        // Tự động giữ đúng tỷ lệ hình ảnh gốc (Aspect Ratio) để không bị méo hình
+        const naturalW = this.sprite.naturalWidth || 1;
+        const naturalH = this.sprite.naturalHeight || 1;
+        const aspect = naturalW / naturalH;
+        const drawH = this.height;
+        const drawW = drawH * aspect;
+
         ctx.drawImage(
           this.sprite,
-          -this.width / 2,
-          -this.height / 2,
-          this.width,
-          this.height
+          -drawW / 2,
+          -drawH / 2,
+          drawW,
+          drawH
         );
       }
 

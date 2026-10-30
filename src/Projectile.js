@@ -96,7 +96,8 @@ export class PlayerProjectile {
 
         // 4. Nếu quái chết
         if (enemy.isDead) {
-          particles.createDeathBurst(enemy.x, enemy.y, enemy.config.color || '#a040b0', 18);
+          const burstColor = (enemy.config && enemy.config.color) || '#a040b0';
+          particles.createDeathBurst(enemy.x, enemy.y, burstColor, 18);
           if (onEnemyKill) {
             onEnemyKill(enemy);
           }
@@ -136,7 +137,7 @@ export class PlayerProjectile {
       ctx.fill();
     }
 
-    // 2. Vẽ Kiếm Pha Lê Hồng xoay theo góc bắn
+    // 2. Vẽ Kiếm Nghi Lễ xoay theo góc bắn
     ctx.translate(screenPos.x, screenPos.y);
     ctx.rotate(this.rotation);
 

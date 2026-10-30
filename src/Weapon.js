@@ -94,14 +94,14 @@ export const WEAPON_UPGRADE_DETAILS = {
 };
 
 // =========================================================================
-// 1. VŨ KHÍ CHÍNH: KIẾM PHA LÊ HỒNG (MAIN WEAPON)
+// 1. VŨ KHÍ CHÍNH: KIẾM NGHI LỄ (MAIN WEAPON)
 // =========================================================================
 export class MainSwordWeapon {
   constructor() {
     this.id = 'main_sword';
-    this.name = 'Kiếm Pha Lê Hồng';
+    this.name = 'Kiếm Nghi Lễ';
     this.icon = 'assets/icons/sword_main.png';
-    this.desc = 'Phóng kiếm pha lê tự động găm vào kẻ địch gần nhất.';
+    this.desc = 'Phóng Kiếm Nghi Lễ sắc bén tự động găm vào kẻ địch gần nhất.';
     this.level = 1;
     this.maxLevel = 7;
     this.type = 'attack';
@@ -184,7 +184,8 @@ export class MainSwordWeapon {
               e.bleedStacks = Math.min(10, (e.bleedStacks || 0) + 1);
 
               if (e.isDead && onEnemyKill) {
-                particles.createDeathBurst(e.x, e.y, e.config.color || '#a040b0');
+                const burstColor = (e.config && e.config.color) || '#a040b0';
+                particles.createDeathBurst(e.x, e.y, burstColor);
                 onEnemyKill(e);
               }
             }
@@ -311,7 +312,8 @@ export class OrbitingBladesWeapon {
           this.hitCooldowns.set(enemy, 0.35); // 0.35s sau mới trúng tiếp
 
           if (enemy.isDead && onEnemyKill) {
-            particles.createDeathBurst(enemy.x, enemy.y, enemy.config.color || '#a040b0');
+            const burstColor = (enemy.config && enemy.config.color) || '#a040b0';
+            particles.createDeathBurst(enemy.x, enemy.y, burstColor);
             onEnemyKill(enemy);
           }
         }
@@ -449,7 +451,8 @@ export class HolyAuraWeapon {
           }
 
           if (e.isDead && onEnemyKill) {
-            particles.createDeathBurst(e.x, e.y, e.config.color || '#a040b0');
+            const burstColor = (e.config && e.config.color) || '#a040b0';
+            particles.createDeathBurst(e.x, e.y, burstColor);
             onEnemyKill(e);
           }
         }
@@ -597,7 +600,8 @@ export class PoolZoneWeapon {
             }
 
             if (e.isDead && onEnemyKill) {
-              particles.createDeathBurst(e.x, e.y, e.config.color || '#a040b0');
+              const burstColor = (e.config && e.config.color) || '#a040b0';
+              particles.createDeathBurst(e.x, e.y, burstColor);
               onEnemyKill(e);
             }
           }
@@ -812,7 +816,8 @@ export class BoomerangWeapon {
           particles.createDamageNumber(e.x, e.y, dmg, isCrit);
 
           if (e.isDead && onEnemyKill) {
-            particles.createDeathBurst(e.x, e.y, e.config.color || '#a040b0');
+            const burstColor = (e.config && e.config.color) || '#a040b0';
+            particles.createDeathBurst(e.x, e.y, burstColor);
             onEnemyKill(e);
           }
         }
@@ -923,7 +928,8 @@ export class ArcSlashWeapon {
               }
 
               if (e.isDead && onEnemyKill) {
-                particles.createDeathBurst(e.x, e.y, e.config.color || '#a040b0');
+                const burstColor = (e.config && e.config.color) || '#a040b0';
+                particles.createDeathBurst(e.x, e.y, burstColor);
                 onEnemyKill(e);
               }
             }
@@ -1127,13 +1133,16 @@ export class WeaponManager {
   }
 
   update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    const cdRate = player && player.isWitch ? 1.20 : 1.0;
     for (const weapon of this.equippedWeapons) {
-      weapon.update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill);
+      if (weapon.isLocked) continue; // Đang bị khóa bởi kỹ năng 7 của Boss
+      weapon.update(delta * cdRate, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill);
     }
   }
 
   render(ctx, camera, player) {
     for (const weapon of this.equippedWeapons) {
+      if (weapon.isLocked) continue;
       weapon.render(ctx, camera, player);
     }
   }

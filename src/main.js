@@ -13,6 +13,14 @@ import { SkillManager } from './SkillManager.js';
 import { UpgradeManager } from './UpgradeManager.js';
 import { EvolutionDrop } from './EvolutionDrop.js';
 import { MetaProgression } from './MetaProgression.js';
+import { HealthDrop } from './HealthDrop.js';
+import { Crate } from './Crate.js';
+import { TreasureBox } from './TreasureBox.js';
+import {
+  MasterySystem,
+  SKILL_TREE_DEFINITIONS,
+  CHARACTER_SPECIAL_MASTERY
+} from './MasterySystem.js';
 
 // Cache các icon pixel art từ bộ asset mới để vẽ tức thì
 const ICON_CACHE = {};
@@ -43,13 +51,26 @@ class Game {
     // Hệ thống Tiến trình Vĩnh viễn (Meta-Progression & Shop)
     this.meta = new MetaProgression();
 
+    // Hệ thống Thông Thạo & Cây Kỹ Năng Nhân Vật (Mastery System)
+    this.masterySystem = new MasterySystem();
+    this.skillTreeSelectedCharId = 'sorceress'; // Tab nhân vật đang xem
+
     // Quản lý Trạng thái Màn hình Game (State Machine)
-    // 'MAIN_MENU' | 'CHAR_SELECT' | 'DIFF_SELECT' | 'SHOP' | 'PLAYING' | 'GAME_OVER'
+    // 'MAIN_MENU' | 'CHAR_SELECT' | 'MODE_SELECT' | 'CHALLENGE_SELECT' | 'DIFF_SELECT' | 'SHOP' | 'SKILL_TREE' | 'PLAYING' | 'GAME_OVER'
     this.gameState = 'MAIN_MENU';
 
-    // Lựa chọn nhân vật & độ khó đã chọn
+    // Lựa chọn nhân vật, chế độ chơi, thử thách & độ khó
     this.selectedChar = CONFIG.CHARACTERS[0];
+    this.selectedMode = CONFIG.MODES[0];
+    this.selectedChallenges = {}; // Object lưu trạng thái bật/tắt thử thách { [id]: boolean }
     this.selectedDiff = CONFIG.DIFFICULTIES[0];
+
+    // Vật phẩm trên bản đồ
+    this.healthDrops = [];
+    this.crates = [];
+    this.treasureBoxes = [];
+    this.pendingLevelUps = 0; // Hàng đợi nhận nâng cấp từ rương/hộp báu
+    this.isVictory = false;
 
     // Kết quả tổng kết cuối trận
     this.endGameStats = {
@@ -119,15 +140,18 @@ class Game {
     this.currentXP = 0;
     this.maxXP = 8;
 
-    // Lấy chỉ số nâng cấp ngoài trận từ MetaProgression
+    // Lấy chỉ số nâng cấp ngoài trận từ MetaProgression & Thông Thạo (Mastery)
     const metaBonuses = this.meta.getBonusStats();
+    const masteryBonuses = this.masterySystem.getBonusStats(this.selectedChar.id);
 
-    // Khởi tạo Nhân vật được chọn kèm bonus
+    // Khởi tạo Nhân vật được chọn kèm bonus và thử thách
     this.player = new Player(
       CONFIG.WORLD_WIDTH / 2,
       CONFIG.WORLD_HEIGHT / 2,
       this.selectedChar,
-      metaBonuses
+      metaBonuses,
+      this.selectedChallenges,
+      masteryBonuses
     );
 
     this.skillManager = new SkillManager();
@@ -136,19 +160,34 @@ class Game {
     const startWeaponId = this.selectedChar.startingWeaponId || 'main_sword';
     this.weaponManager = new WeaponManager(startWeaponId);
     this.upgradeManager = new UpgradeManager(this.weaponManager, this.skillManager);
+    this.upgradeManager.applyChallenges(this.selectedChallenges);
 
-    // Cập nhật độ khó cho Spawner
-    this.spawner.setDifficulty(this.selectedDiff);
+    // Cập nhật độ khó & chế độ & thử thách cho Spawner
+    this.spawner.setDifficulty(this.selectedDiff, this.selectedMode.id, this.selectedChallenges);
 
     this.enemies = [];
     this.enemyProjectiles = [];
     this.playerProjectiles = [];
     this.experienceGems = [];
     this.evolutionDrops = [];
+    this.healthDrops = [];
+    this.treasureBoxes = [];
+    this.pendingLevelUps = 0;
+    this.isVictory = false;
+
+    // Rải sẵn 25 Thùng Gỗ phá vỡ được khắp bản đồ (không respawn)
+    this.crates = [];
+    const crateCount = 25;
+    for (let i = 0; i < crateCount; i++) {
+      const cx = 350 + Math.random() * (CONFIG.WORLD_WIDTH - 700);
+      const cy = 350 + Math.random() * (CONFIG.WORLD_HEIGHT - 700);
+      this.crates.push(new Crate(cx, cy));
+    }
 
     this.isPaused = false;
     this.isLevelUpOpen = false;
     this.isEvolutionOpen = false;
+    this.witchBannerTimer = 0;
     this.gameState = 'PLAYING';
 
     // Sinh ngay 1 Tử thần ban đầu
@@ -178,6 +217,19 @@ class Game {
     return null;
   }
 
+  // Kích hoạt Thức Tỉnh Phù Thủy (Witch Awakening)
+  triggerWitchAwakening() {
+    if (!this.player || this.player.isWitch || !this.player.hasWitchForm) return;
+    this.player.awakenWitchForm();
+
+    // Hiệu ứng bộc phát ma thuật cực hoành tráng
+    this.particles.createArcaneBlast(this.player.x, this.player.y, 4.5);
+    this.particles.createDeathBurst(this.player.x, this.player.y, '#c026d3', 100);
+    this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 60);
+
+    this.witchBannerTimer = 4.0; // Hiển thị banner trong 4 giây
+  }
+
   // 1. Lưu trận đấu hiện tại và thoát ra Menu Chính
   saveAndExit() {
     try {
@@ -189,7 +241,10 @@ class Game {
         currentXP: this.currentXP,
         maxXP: this.maxXP,
         selectedCharId: this.selectedChar.id,
+        selectedModeId: this.selectedMode.id,
+        selectedChallenges: this.selectedChallenges,
         selectedDiffId: this.selectedDiff.id,
+        isWitch: this.player ? this.player.isWitch : false,
         player: {
           x: this.player.x,
           y: this.player.y,
@@ -223,10 +278,13 @@ class Game {
     const data = this.getSavedGameInfo();
     if (!data) return;
 
-    // Tìm lại char và diff
+    // Tìm lại char, mode, challenge và diff
     const char = CONFIG.CHARACTERS.find(c => c.id === data.selectedCharId) || CONFIG.CHARACTERS[0];
+    const mode = CONFIG.MODES.find(m => m.id === data.selectedModeId) || CONFIG.MODES[0];
     const diff = CONFIG.DIFFICULTIES.find(d => d.id === data.selectedDiffId) || CONFIG.DIFFICULTIES[0];
     this.selectedChar = char;
+    this.selectedMode = mode;
+    this.selectedChallenges = data.selectedChallenges || {};
     this.selectedDiff = diff;
 
     // Lấy chỉ số nâng cấp ngoài trận từ MetaProgression
@@ -237,7 +295,8 @@ class Game {
       data.player.x,
       data.player.y,
       this.selectedChar,
-      metaBonuses
+      metaBonuses,
+      this.selectedChallenges
     );
     this.player.health = data.player.health;
     this.player.maxHealth = data.player.maxHealth;
@@ -248,9 +307,14 @@ class Game {
     const startWeaponId = this.selectedChar.startingWeaponId || 'main_sword';
     this.weaponManager = new WeaponManager(startWeaponId);
     this.upgradeManager = new UpgradeManager(this.weaponManager, this.skillManager);
+    this.upgradeManager.applyChallenges(this.selectedChallenges);
     this.upgradeManager.restoreEquippedData(data.equipped, this.player);
 
-    this.spawner.setDifficulty(this.selectedDiff);
+    if (data.isWitch) {
+      this.player.awakenWitchForm();
+    }
+
+    this.spawner.setDifficulty(this.selectedDiff, this.selectedMode.id, this.selectedChallenges);
 
     this.gameTime = data.gameTime;
     this.killCount = data.killCount;
@@ -263,6 +327,10 @@ class Game {
     this.playerProjectiles = [];
     this.experienceGems = [];
     this.evolutionDrops = [];
+    this.healthDrops = [];
+    this.treasureBoxes = [];
+    this.crates = [];
+    this.isVictory = false;
 
     // Cập nhật vị trí camera ngay lập tức
     this.camera.follow(this.player);
@@ -286,14 +354,35 @@ class Game {
     const timeScore = Math.floor(this.gameTime) * 15;
     const killScore = this.killCount * 25;
     const levelScore = this.level * 100;
-    const rawScore = timeScore + killScore + levelScore;
-    const finalScore = Math.round(rawScore * (this.selectedDiff.scoreMult || 1.0));
+    const victoryScore = this.isVictory ? 50000 : 0;
+    const victoryGold = this.isVictory ? 500 : 0;
+    const rawScore = timeScore + killScore + levelScore + victoryScore;
 
-    // Tính toán Tiền Vàng nhận được: dựa vào quái giết được + thời gian sống + nhân độ khó + bonus shop + clover
+    // Tính toán hệ số Thử Thách (Chỉ nhận thưởng nếu sống sót ít nhất 2 phút = 120s)
+    let challengeScoreBonus = 0;
+    let challengeGoldBonus = 0;
+    const activeChallengeList = [];
+
+    if (this.gameTime >= 120) {
+      for (const ch of CONFIG.CHALLENGES) {
+        if (this.selectedChallenges[ch.id]) {
+          challengeScoreBonus += ch.scoreBonus;
+          challengeGoldBonus += ch.goldBonus;
+          activeChallengeList.push(ch);
+        }
+      }
+    }
+
+    const challengeScoreMult = 1.0 + challengeScoreBonus;
+    const challengeGoldMult = 1.0 + challengeGoldBonus;
+
+    const finalScore = Math.round(rawScore * (this.selectedDiff.scoreMult || 1.0) * challengeScoreMult);
+
+    // Tính toán Tiền Vàng nhận được: dựa vào quái giết được + thời gian sống + nhân độ khó + bonus shop + clover + challenge
     const metaBonuses = this.meta.getBonusStats();
     const cloverMult = this.upgradeManager ? this.upgradeManager.getCloverGoldBonus() : 1.0;
-    const baseGold = Math.floor(this.killCount * 1.5 + this.gameTime * 0.4 + this.level * 5);
-    const finalGold = Math.round(baseGold * (this.selectedDiff.goldMult || 1.0) * metaBonuses.goldMultiplier * cloverMult);
+    const baseGold = Math.floor(this.killCount * 1.5 + this.gameTime * 0.4 + this.level * 5) + victoryGold;
+    const finalGold = Math.round(baseGold * (this.selectedDiff.goldMult || 1.0) * metaBonuses.goldMultiplier * cloverMult * challengeGoldMult);
 
     // Lưu trữ vào MetaProgression
     this.meta.gold += finalGold;
@@ -303,12 +392,23 @@ class Game {
     }
     this.meta.save();
 
+    // Tích lũy điểm Score vào Thông Thạo riêng của nhân vật đã chọn
+    this.masterySystem.addScore(this.selectedChar.id, finalScore);
+    const charMastery = this.masterySystem.getCharData(this.selectedChar.id);
+
     this.endGameStats = {
       score: finalScore,
       goldEarned: finalGold,
       survivalTime: this.gameTime,
       kills: this.killCount,
-      level: this.level
+      level: this.level,
+      isVictory: this.isVictory,
+      activeChallenges: activeChallengeList,
+      challengeScoreBonus,
+      challengeGoldBonus,
+      qualifiedForChallengeBonus: this.gameTime >= 120,
+      charMastery: charMastery,
+      charName: this.selectedChar.name
     };
   }
 
@@ -390,6 +490,34 @@ class Game {
         this.upgradeManager.checkEvolutionReadiness();
         this.evolutionDrops.push(new EvolutionDrop(this.player.x + 100, this.player.y));
       }
+      if (e.key === '6') {
+        // Phím tắt test nhanh Thức Tỉnh Phù Thủy (Witch Form)
+        this.triggerWitchAwakening();
+      }
+      if (e.key === '7') {
+        // Tua nhanh +60 giây
+        this.gameTime += 60;
+        this.particles.createArcaneBlast(this.player.x, this.player.y, 2.0);
+      }
+      if (e.key === '8') {
+        // Nhảy thời gian tới trước mốc Boss tiếp theo (để test boss lập tức)
+        // Các mốc: 150s (Mini Boss 1), 300s (2 Mini Boss), 450s (3 Mini Boss), 600s (Meruru),
+        // 750s (Mini Boss+Swarm), 900s (2 Mini Boss+Swarm), 1050s (3 Mini Boss), 1200s (Yuki)
+        const bossCheckpoints = [145, 295, 445, 595, 745, 895, 1045, 1195];
+        const nextTarget = bossCheckpoints.find(t => t > this.gameTime + 2);
+        if (nextTarget !== undefined) {
+          this.gameTime = nextTarget;
+        } else {
+          this.gameTime += 120;
+        }
+        this.particles.createArcaneBlast(this.player.x, this.player.y, 2.8);
+        this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 50);
+      }
+      if (e.key === '9') {
+        // Tua nhanh +180s (3 phút)
+        this.gameTime += 180;
+        this.particles.createArcaneBlast(this.player.x, this.player.y, 2.0);
+      }
     }
   }
 
@@ -425,6 +553,21 @@ class Game {
           const selected = this.currentChoices[i];
           this.upgradeManager.applyChoice(selected, this.player);
           this.isLevelUpOpen = false;
+
+          // Kiểm tra Thức Tỉnh Phù Thủy nếu vừa chọn kỹ năng thứ 3
+          if (this.player && this.player.hasWitchForm && !this.player.isWitch) {
+            const killsNeeded = this.player.witchKillRequirement || 100;
+            const skillsUnlocked = this.skillManager ? this.skillManager.getUnlockedCount() : 0;
+            if (this.killCount >= killsNeeded && skillsUnlocked >= 3) {
+              this.triggerWitchAwakening();
+            }
+          }
+
+          // Kiểm tra hàng đợi nhận nâng cấp từ rương/hộp báu
+          if (this.pendingLevelUps > 0) {
+            this.pendingLevelUps--;
+            setTimeout(() => this.triggerLevelUp(), 100);
+          }
           return;
         }
       }
@@ -488,10 +631,38 @@ class Game {
       this.gameState = 'CHAR_SELECT';
     } else if (actionId === 'open_shop') {
       this.gameState = 'SHOP';
+    } else if (actionId === 'open_skill_tree') {
+      this.skillTreeSelectedCharId = this.selectedChar ? this.selectedChar.id : 'sorceress';
+      this.gameState = 'SKILL_TREE';
+    } else if (actionId.startsWith('open_char_skill_tree_')) {
+      this.skillTreeSelectedCharId = actionId.replace('open_char_skill_tree_', '');
+      this.gameState = 'SKILL_TREE';
+    } else if (actionId.startsWith('select_skill_char_')) {
+      this.skillTreeSelectedCharId = actionId.replace('select_skill_char_', '');
+    } else if (actionId === 'level_up_mastery') {
+      this.masterySystem.levelUpMastery(this.skillTreeSelectedCharId);
+    } else if (actionId === 'level_up_max_mastery') {
+      this.masterySystem.levelUpMax(this.skillTreeSelectedCharId);
+    } else if (actionId.startsWith('allocate_skill_')) {
+      const skillKey = actionId.replace('allocate_skill_', '');
+      this.masterySystem.allocateSkill(this.skillTreeSelectedCharId, skillKey);
+    } else if (actionId === 'reset_mastery_skills') {
+      this.masterySystem.resetSkills(this.skillTreeSelectedCharId);
+    } else if (actionId === 'back_from_skill_tree') {
+      this.gameState = 'MAIN_MENU';
     } else if (actionId === 'how_to_play') {
       alert('🎮 HƯỚNG DẪN CHƠI:\n- Di chuyển: Phím W, A, S, D hoặc Mũi tên\n- Tấn công: Tự động 100%\n- Nhặt Đá Kinh Nghiệm để thăng cấp và chọn vũ khí\n- Khi có 2 vũ khí Max Cấp 7, Lõi Tiến Hóa sẽ rơi xuống để Hợp Nhất Vũ Khí Tối Thượng!\n- Tiêu diệt quái kiếm Vàng để Nâng Cấp Vĩnh Viễn tại Cổ Viện Ma Pháp.');
     } else if (actionId.startsWith('select_char_')) {
       if (btnData.charData) this.selectedChar = btnData.charData;
+    } else if (actionId === 'goto_mode_select') {
+      this.gameState = 'MODE_SELECT';
+    } else if (actionId.startsWith('select_mode_')) {
+      if (btnData.modeData) this.selectedMode = btnData.modeData;
+    } else if (actionId === 'goto_challenge_select') {
+      this.gameState = 'CHALLENGE_SELECT';
+    } else if (actionId.startsWith('toggle_challenge_')) {
+      const chId = actionId.replace('toggle_challenge_', '');
+      this.selectedChallenges[chId] = !this.selectedChallenges[chId];
     } else if (actionId === 'goto_diff_select') {
       this.gameState = 'DIFF_SELECT';
     } else if (actionId.startsWith('select_diff_')) {
@@ -502,6 +673,10 @@ class Game {
       this.gameState = 'MAIN_MENU';
     } else if (actionId === 'back_to_char_select') {
       this.gameState = 'CHAR_SELECT';
+    } else if (actionId === 'back_to_mode_select') {
+      this.gameState = 'MODE_SELECT';
+    } else if (actionId === 'back_to_challenge_select') {
+      this.gameState = 'CHALLENGE_SELECT';
     } else if (actionId.startsWith('buy_upgrade_')) {
       const upId = actionId.replace('buy_upgrade_', '');
       this.meta.buyUpgrade(upId);
@@ -534,41 +709,99 @@ class Game {
     requestAnimationFrame((t) => this.loop(t));
   }
 
+  triggerTreasureBox() {
+    this.particles.createArcaneBlast(this.player.x, this.player.y, 3.0);
+    this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 80);
+    if (this.isLevelUpOpen) {
+      this.pendingLevelUps++;
+    } else {
+      this.triggerLevelUp();
+    }
+  }
+
   update(delta) {
     if (!this.player.isDead) {
       this.gameTime += delta;
       this.player.update(delta, this.input);
       this.camera.follow(this.player);
 
-      // Tự hồi máu nếu có trang bị
+      if (this.witchBannerTimer > 0) {
+        this.witchBannerTimer -= delta;
+      }
+
+      // Cập nhật UpgradeManager (đếm ngược thời gian khóa ô kỹ năng 7 của Yuki)
+      this.upgradeManager.update(delta);
+
+      // Tự hồi máu nếu có trang bị (kiểm tra thử thách Không Hồi Máu)
       const regenItem = this.upgradeManager.passivePool.regen;
-      if (regenItem && regenItem.level > 0) {
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + regenItem.level * 1.0 * delta);
+      if (regenItem && regenItem.level > 0 && !regenItem.isLocked) {
+        this.player.heal(regenItem.level * 1.0 * delta);
       }
 
       // 1. Vũ khí tự động
-      const dmgMult = this.skillManager.getDamageMultiplier();
+      const dmgMult = this.skillManager.getDamageMultiplier() * (this.player.isWitch ? 1.30 : 1.0);
       const onEnemyKill = (killedEnemy) => {
         this.killCount++;
         this.skillManager.onDamageDealt(30, this.player);
 
-        // Hiệu ứng nổ phép thuật Arcane FX cho quái tinh anh
-        if (killedEnemy.isElite) {
-          this.particles.createArcaneBlast(killedEnemy.x, killedEnemy.y, 2.6);
+        // Kiểm tra điều kiện Thức Tỉnh Phù Thủy (Witch Awakening)
+        if (this.player && this.player.hasWitchForm && !this.player.isWitch) {
+          const killsNeeded = this.player.witchKillRequirement || 100;
+          const skillsUnlocked = this.skillManager ? this.skillManager.getUnlockedCount() : 0;
+          if (this.killCount >= killsNeeded && skillsUnlocked >= 3) {
+            this.triggerWitchAwakening();
+          }
         }
 
-        // Rơi Đá Kinh Nghiệm
-        let xpVal = 1;
-        if (killedEnemy.isElite) xpVal = 30;
-        else if (killedEnemy.isRanged) xpVal = 8;
-        else if (killedEnemy.config.id === 'skeleton') xpVal = 3;
+        // Hiệu ứng nổ phép thuật Arcane FX cho quái tinh anh & Boss
+        if (killedEnemy.isElite || killedEnemy.isBoss) {
+          this.particles.createArcaneBlast(killedEnemy.x, killedEnemy.y, 3.2);
+          this.particles.createDeathBurst(killedEnemy.x, killedEnemy.y, '#ffd700', 70);
+        }
 
-        this.experienceGems.push(new ExperienceGem(killedEnemy.x, killedEnemy.y, xpVal));
+        // --- CƠ CHẾ RƠI VẬT PHẨM KHI QUÁI CHẾT ---
+        // A. Mini Boss chết rơi 1 Hộp Báu Vật
+        if (killedEnemy.isMiniBoss) {
+          this.treasureBoxes.push(new TreasureBox(killedEnemy.x, killedEnemy.y));
+          this.experienceGems.push(new ExperienceGem(killedEnemy.x, killedEnemy.y, 45));
+        }
+        // B. Main Boss chết rơi 2 Hộp Báu Vật
+        else if (killedEnemy.isMainBoss) {
+          this.treasureBoxes.push(new TreasureBox(killedEnemy.x - 40, killedEnemy.y));
+          this.treasureBoxes.push(new TreasureBox(killedEnemy.x + 40, killedEnemy.y));
+          this.experienceGems.push(new ExperienceGem(killedEnemy.x, killedEnemy.y, 100));
 
-        // Rơi Rương Tiến Hóa nếu đủ điều kiện
-        if (this.upgradeManager.canEvolve && this.evolutionDrops.length === 0) {
-          if (killedEnemy.isElite || Math.random() < 0.25) {
-            this.evolutionDrops.push(new EvolutionDrop(killedEnemy.x, killedEnemy.y));
+          // Nếu là Boss Cuối Cùng Yuki bị tiêu diệt trong Chế Độ Bình Thường
+          if (killedEnemy.isFinalBoss && this.selectedMode.id === 'normal') {
+            this.isVictory = true;
+            this.finishGame();
+            return;
+          }
+        }
+        // C. Quái thường
+        else {
+          let xpVal = 1;
+          if (killedEnemy.isElite) xpVal = 30;
+          else if (killedEnemy.isRanged) xpVal = 8;
+          else if (killedEnemy.config && killedEnemy.config.id === 'skeleton') xpVal = 3;
+
+          this.experienceGems.push(new ExperienceGem(killedEnemy.x, killedEnemy.y, xpVal));
+
+          // Tỷ lệ rơi Cục Máu từ quái thường:
+          // 0.5% (0.005) rơi Cục Máu Nhỏ (+40 HP)
+          // 0.1% (0.001) rơi Cục Máu Lớn (+70% Max HP)
+          const roll = Math.random();
+          if (roll < 0.001) {
+            this.healthDrops.push(new HealthDrop(killedEnemy.x, killedEnemy.y, 'large'));
+          } else if (roll < 0.006) {
+            this.healthDrops.push(new HealthDrop(killedEnemy.x, killedEnemy.y, 'small'));
+          }
+
+          // Rơi Rương Tiến Hóa nếu đủ điều kiện
+          if (this.upgradeManager.canEvolve && this.evolutionDrops.length === 0) {
+            if (killedEnemy.isElite || Math.random() < 0.25) {
+              this.evolutionDrops.push(new EvolutionDrop(killedEnemy.x, killedEnemy.y));
+            }
           }
         }
       };
@@ -583,26 +816,51 @@ class Game {
         onEnemyKill
       );
 
-      // 2. Đạn kiếm của người chơi
+      // 2. Đạn kiếm của người chơi (đồng thời kiểm tra va chạm với Thùng Gỗ)
       for (let i = this.playerProjectiles.length - 1; i >= 0; i--) {
         const proj = this.playerProjectiles[i];
         proj.update(delta, this.enemies, this.particles, onEnemyKill);
+
+        // Kiểm tra va chạm với Thùng Gỗ
+        for (const crate of this.crates) {
+          if (!crate.isDead && Math.hypot(proj.x - crate.x, proj.y - crate.y) < proj.radius + crate.getHitboxRadius()) {
+            this.breakCrate(crate);
+            proj.isDead = true;
+            break;
+          }
+        }
+
         if (proj.isDead) {
           this.playerProjectiles.splice(i, 1);
         }
       }
 
-      // 3. Dọn quái chết
+      // Kiểm tra người chơi đánh cận chiến/quét trúng Thùng Gỗ
+      const pRadius = this.player.getHitboxRadius() + 35;
+      for (const crate of this.crates) {
+        if (!crate.isDead && Math.hypot(this.player.x - crate.x, this.player.y - crate.y) < pRadius + crate.getHitboxRadius()) {
+          this.breakCrate(crate);
+        }
+      }
+
+      // Dọn Thùng Gỗ vỡ
+      this.crates = this.crates.filter(c => !c.isDead);
+
+      // 3. Dọn quái chết (Riêng Boss & Mini Boss KHÔNG BAO GIỜ biến mất trừ khi chết)
       for (let i = this.enemies.length - 1; i >= 0; i--) {
         if (this.enemies[i].isDead) {
           this.enemies.splice(i, 1);
         }
       }
 
-      // 4. Sinh quái mới
-      const newEnemy = this.spawner.update(delta, this.gameTime, this.camera, this.enemies);
-      if (newEnemy) {
-        this.enemies.push(newEnemy);
+      // 4. Sinh quái mới & Xử lý Timeline Boss
+      const newSpawns = this.spawner.update(delta, this.gameTime, this.camera, this.player, this.enemies);
+      if (newSpawns) {
+        if (Array.isArray(newSpawns)) {
+          for (const s of newSpawns) this.enemies.push(s);
+        } else {
+          this.enemies.push(newSpawns);
+        }
       }
 
       // 5. Quái bám đuổi & gây sát thương
@@ -614,14 +872,30 @@ class Game {
 
       for (let i = 0; i < this.enemies.length; i++) {
         const enemy = this.enemies[i];
-        enemy.update(delta, this.player, this.enemies, onEnemyShoot);
+
+        // Nếu là YukiBoss hoặc MeruruBoss
+        if (enemy.isFinalBoss) {
+          enemy.update(
+            delta,
+            this.player,
+            this.enemies,
+            onEnemyShoot,
+            this.particles,
+            (sx, sy, cnt) => this.spawner.spawnSwarmRing(this.player, cnt, this.enemies),
+            this.upgradeManager
+          );
+        } else if (enemy.isMainBoss) {
+          enemy.update(delta, this.player, this.enemies, onEnemyShoot, this.particles);
+        } else {
+          enemy.update(delta, this.player, this.enemies, onEnemyShoot);
+        }
 
         const dist = Math.hypot(enemy.x - this.player.x, enemy.y - this.player.y);
         if (dist < enemy.getHitboxRadius() + this.player.getHitboxRadius()) {
           const finalDmg = enemy.damage * (1.0 - dmgReduction);
           if (this.player.takeDamage(finalDmg)) {
             const thornItem = this.upgradeManager.passivePool.thorns;
-            if (thornItem && thornItem.level > 0) {
+            if (thornItem && thornItem.level > 0 && !thornItem.isLocked) {
               enemy.takeDamage(20 * thornItem.level);
               this.particles.createDamageNumber(enemy.x, enemy.y, 20 * thornItem.level);
             }
@@ -651,6 +925,31 @@ class Game {
         }
       }
 
+      // 7.5. Hút & Nhặt Cục Máu (Health Drops)
+      for (let i = this.healthDrops.length - 1; i >= 0; i--) {
+        const drop = this.healthDrops[i];
+        const healAmt = drop.update(delta, this.player, magnetRadius);
+        if (healAmt > 0) {
+          const actualHealed = this.player.heal(healAmt);
+          if (actualHealed > 0) {
+            this.particles.createDamageNumber(this.player.x, this.player.y - 25, Math.round(actualHealed), false, '#22c55e');
+            this.particles.createDeathBurst(this.player.x, this.player.y, '#22c55e', 35);
+          }
+        }
+        if (drop.isDead) {
+          this.healthDrops.splice(i, 1);
+        }
+      }
+
+      // 7.8. Nhặt Hộp Báu Vật (Treasure Boxes)
+      for (let i = this.treasureBoxes.length - 1; i >= 0; i--) {
+        const box = this.treasureBoxes[i];
+        box.update(delta, this.player, () => this.triggerTreasureBox());
+        if (box.isDead) {
+          this.treasureBoxes.splice(i, 1);
+        }
+      }
+
       // 8. Rương Tiến Hóa
       for (let i = this.evolutionDrops.length - 1; i >= 0; i--) {
         const drop = this.evolutionDrops[i];
@@ -673,6 +972,26 @@ class Game {
     }
   }
 
+  // Phá vỡ thùng gỗ và rơi vật phẩm
+  breakCrate(crate) {
+    if (crate.takeDamage(1)) {
+      this.particles.createDeathBurst(crate.x, crate.y, '#8b5a2b', 40);
+
+      // Tỷ lệ rơi từ thùng gỗ:
+      // 70% Đá Kinh Nghiệm
+      // 20% Cục Máu Nhỏ (+40 HP)
+      // 10% Cục Máu Lớn (+70% Max HP)
+      const roll = Math.random();
+      if (roll < 0.70) {
+        this.experienceGems.push(new ExperienceGem(crate.x, crate.y, 2));
+      } else if (roll < 0.90) {
+        this.healthDrops.push(new HealthDrop(crate.x, crate.y, 'small'));
+      } else {
+        this.healthDrops.push(new HealthDrop(crate.x, crate.y, 'large'));
+      }
+    }
+  }
+
   render() {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -681,9 +1000,18 @@ class Game {
       // 1. Mặt đất
       this.map.renderGround(this.ctx, this.camera);
 
-      // 2. Đá Kinh Nghiệm & Rương Tiến Hóa
+      // 2. Thùng Gỗ, Đá Kinh Nghiệm, Cục Máu, Hộp Báu & Rương Tiến Hóa
+      for (const crate of this.crates) {
+        crate.render(this.ctx, this.camera);
+      }
       for (const gem of this.experienceGems) {
         gem.render(this.ctx, this.camera);
+      }
+      for (const drop of this.healthDrops) {
+        drop.render(this.ctx, this.camera);
+      }
+      for (const box of this.treasureBoxes) {
+        box.render(this.ctx, this.camera);
       }
       for (const drop of this.evolutionDrops) {
         drop.render(this.ctx, this.camera);
@@ -730,6 +1058,35 @@ class Game {
       // 6. Bóng đêm & Quầng sáng
       this.map.renderLighting(this.ctx, this.camera, this.player);
 
+      // 6.5. Hiệu ứng Màn Đêm Hắc Ám của Meruru (Làm đen mù màn hình người chơi)
+      const meruruBoss = this.enemies.find(e => e.isMainBoss && !e.isFinalBoss && !e.isDead && e.blindnessTimer > 0);
+      if (meruruBoss) {
+        this.ctx.save();
+        const pScreen = this.camera.worldToScreen(this.player.x, this.player.y);
+
+        // Phủ bóng tối đen kịt toàn màn hình
+        this.ctx.fillStyle = 'rgba(3, 4, 8, 0.95)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Khoét một quầng sáng mờ rất nhỏ sát người chơi (bán kính 140px)
+        this.ctx.globalCompositeOperation = 'destination-out';
+        const holeGrad = this.ctx.createRadialGradient(pScreen.x, pScreen.y, 25, pScreen.x, pScreen.y, 140);
+        holeGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+        holeGrad.addColorStop(0.6, 'rgba(0, 0, 0, 0.7)');
+        holeGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        this.ctx.fillStyle = holeGrad;
+        this.ctx.beginPath();
+        this.ctx.arc(pScreen.x, pScreen.y, 140, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.globalCompositeOperation = 'source-over';
+        this.ctx.fillStyle = '#ec4899';
+        this.ctx.font = 'bold 22px "Segoe UI", serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('🌑 MÀN ĐÊM HẮC ÁM CỦA MERURU! TẦM NHÌN BỊ CHE KHUẤT! 🌑', this.canvas.width / 2, 140);
+        this.ctx.restore();
+      }
+
       // 7. Giao diện HUD (kèm Icon thật trong ô trang bị)
       this.renderHUD();
 
@@ -760,11 +1117,20 @@ class Game {
       case 'CHAR_SELECT':
         this.renderCharSelect();
         break;
+      case 'MODE_SELECT':
+        this.renderModeSelect();
+        break;
+      case 'CHALLENGE_SELECT':
+        this.renderChallengeSelect();
+        break;
       case 'DIFF_SELECT':
         this.renderDiffSelect();
         break;
       case 'SHOP':
         this.renderShop();
+        break;
+      case 'SKILL_TREE':
+        this.renderSkillTree();
         break;
       case 'GAME_OVER':
         this.renderGameOver();
@@ -902,21 +1268,111 @@ class Game {
       curX += slotSize + 6;
     }
 
-    // --- ĐỒNG HỒ SINH TỒN ---
+    // --- THANH TIẾN ĐỘ THỨC TỈNH PHÙ THỦY (WITCH PROGRESS BAR) ---
+    if (this.player && this.player.hasWitchForm) {
+      const wBarX = hpBarX;
+      const wBarY = slotStartY + slotSize + 10;
+      const wBarW = hpBarW;
+      const wBarH = 22;
+
+      const killsNeeded = this.player.witchKillRequirement || 100;
+      const currentKills = Math.min(this.killCount, killsNeeded);
+      const skillsUnlocked = this.skillManager ? this.skillManager.getUnlockedCount() : 0;
+
+      // Khung nền
+      this.ctx.fillStyle = 'rgba(14, 10, 24, 0.90)';
+      this.ctx.fillRect(wBarX - 2, wBarY - 2, wBarW + 4, wBarH + 4);
+
+      if (!this.player.isWitch) {
+        // Tiến độ: 50% từ quái diệt + 50% từ 3 kỹ năng riêng
+        const killRatio = currentKills / killsNeeded;
+        const skillRatio = skillsUnlocked / 3;
+        const totalProgress = Math.min(1.0, killRatio * 0.5 + skillRatio * 0.5);
+
+        const progGrad = this.ctx.createLinearGradient(wBarX, 0, wBarX + wBarW, 0);
+        progGrad.addColorStop(0, '#7c3aed');
+        progGrad.addColorStop(1, '#c026d3');
+
+        this.ctx.fillStyle = progGrad;
+        this.ctx.fillRect(wBarX, wBarY, wBarW * totalProgress, wBarH);
+
+        this.ctx.strokeStyle = '#a855f7';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(wBarX - 2, wBarY - 2, wBarW + 4, wBarH + 4);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(
+          `🧙‍♀️ TIẾN ĐỘ WITCH: 💀 ${currentKills}/${killsNeeded} Quái  |  ⭐ Kỹ Năng: ${skillsUnlocked}/3 (${Math.round(totalProgress * 100)}%)`,
+          wBarX + wBarW / 2,
+          wBarY + 16
+        );
+      } else {
+        // Đã thức tỉnh vĩnh viễn
+        const awakenedGrad = this.ctx.createLinearGradient(wBarX, 0, wBarX + wBarW, 0);
+        awakenedGrad.addColorStop(0, '#9333ea');
+        awakenedGrad.addColorStop(0.4, '#ec4899');
+        awakenedGrad.addColorStop(1, '#ffd700');
+
+        this.ctx.fillStyle = awakenedGrad;
+        this.ctx.fillRect(wBarX, wBarY, wBarW, wBarH);
+
+        this.ctx.strokeStyle = '#ffd700';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(wBarX - 2, wBarY - 2, wBarW + 4, wBarH + 4);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 13px "Segoe UI", Arial, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(`👑 ĐÃ THỨC TỈNH PHÙ THỦY VĨNH VIỄN (WITCH FORM)`, wBarX + wBarW / 2, wBarY + 16);
+      }
+    }
+
+    // --- ĐỒNG HỒ SINH TỒN & CHẾ ĐỘ CHƠI ---
     const minutes = Math.floor(this.gameTime / 60);
     const seconds = Math.floor(this.gameTime % 60);
     const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-    this.ctx.fillStyle = 'rgba(12, 18, 30, 0.88)';
-    this.ctx.fillRect(this.canvas.width / 2 - 100, 32, 200, 48);
+    const isNormal = this.selectedMode.id === 'normal';
+    const leftSec = Math.max(0, 1200 - this.gameTime);
+    const leftMin = Math.floor(leftSec / 60);
+    const leftRemain = Math.floor(leftSec % 60);
+    const modeSubText = isNormal
+      ? `⏱️ 20:00 (Còn ${leftMin}:${leftRemain.toString().padStart(2, '0')})`
+      : `♾️ VÔ TẬN`;
+
+    const clockW = 240;
+    const clockH = 58;
+    this.ctx.fillStyle = 'rgba(12, 18, 30, 0.90)';
+    this.ctx.fillRect(this.canvas.width / 2 - clockW / 2, 32, clockW, clockH);
     this.ctx.strokeStyle = '#d4af37';
     this.ctx.lineWidth = 1.8;
-    this.ctx.strokeRect(this.canvas.width / 2 - 100, 32, 200, 48);
+    this.ctx.strokeRect(this.canvas.width / 2 - clockW / 2, 32, clockW, clockH);
 
     this.ctx.fillStyle = '#ffecb3';
-    this.ctx.font = 'bold 26px monospace';
+    this.ctx.font = 'bold 24px monospace';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(timeStr, this.canvas.width / 2, 66);
+    this.ctx.fillText(timeStr, this.canvas.width / 2, 59);
+
+    this.ctx.fillStyle = isNormal ? '#38bdf8' : '#f43f5e';
+    this.ctx.font = 'bold 12px sans-serif';
+    this.ctx.fillText(modeSubText, this.canvas.width / 2, 79);
+
+    // Cảnh báo nếu đang bị Chúa Tể Yuki khóa 1 ô trang bị (Skill 7)
+    if (this.upgradeManager.tempLockedSlot) {
+      const lockInfo = this.upgradeManager.tempLockedSlot;
+      const secLeft = Math.ceil(lockInfo.timer);
+      this.ctx.fillStyle = 'rgba(220, 38, 38, 0.92)';
+      this.ctx.fillRect(this.canvas.width / 2 - 230, 98, 460, 32);
+      this.ctx.strokeStyle = '#fecaca';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(this.canvas.width / 2 - 230, 98, 460, 32);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 13px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(`🔒 KỸ NĂNG [${lockInfo.name}] ĐANG BỊ PHONG ẤN (${secLeft}s)`, this.canvas.width / 2, 119);
+    }
 
     // --- SỐ QUÁI ĐÃ TIÊU DIỆT ---
     const statsX = this.canvas.width - 440;
@@ -947,6 +1403,30 @@ class Game {
     this.ctx.font = 'bold 15px sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText(this.isPaused ? '▶ Tiếp Tục' : '⏸ Tạm Dừng (P)', btn.x + btn.w / 2, btn.y + 30);
+
+    // --- BANNER THÔNG BÁO VỪA THỨC TỈNH PHÙ THỦY ---
+    if (this.witchBannerTimer > 0) {
+      this.ctx.save();
+      const bannerY = this.canvas.height * 0.28;
+      this.ctx.fillStyle = 'rgba(20, 8, 32, 0.92)';
+      this.ctx.fillRect(this.canvas.width / 2 - 400, bannerY - 38, 800, 78);
+      this.ctx.strokeStyle = '#e879f9';
+      this.ctx.lineWidth = 3;
+      this.ctx.strokeRect(this.canvas.width / 2 - 400, bannerY - 38, 800, 78);
+
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.font = 'bold 36px "Segoe UI", serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.shadowColor = '#d946ef';
+      this.ctx.shadowBlur = 24;
+      this.ctx.fillText('⭐ THỨC TỈNH PHÙ THỦY VĨNH VIỄN! ⭐', this.canvas.width / 2, bannerY + 6);
+      this.ctx.shadowBlur = 0;
+
+      this.ctx.fillStyle = '#fdf4ff';
+      this.ctx.font = 'bold 16px sans-serif';
+      this.ctx.fillText('Hồi đầy Máu, +50 HP, +30% Sát thương, +20% Tốc độ & Chí mạng tối thượng!', this.canvas.width / 2, bannerY + 31);
+      this.ctx.restore();
+    }
 
     this.ctx.restore();
   }
@@ -1122,8 +1602,8 @@ class Game {
     this.ctx.fillStyle = 'rgba(5, 8, 15, 0.85)';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const panelW = 760;
-    const panelH = 500;
+    const panelW = 820;
+    const panelH = 540;
     const panelX = this.canvas.width / 2 - panelW / 2;
     const panelY = this.canvas.height / 2 - panelH / 2;
 
@@ -1134,18 +1614,20 @@ class Game {
     this.ctx.strokeRect(panelX, panelY, panelW, panelH);
 
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 48px "Segoe UI", serif';
+    this.ctx.font = 'bold 44px "Segoe UI", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('ĐÃ TẠM DỪNG', this.canvas.width / 2, panelY + 70);
+    this.ctx.fillText('ĐÃ TẠM DỪNG', this.canvas.width / 2, panelY + 62);
 
     this.ctx.fillStyle = '#b0c4de';
-    this.ctx.font = '20px sans-serif';
-    this.ctx.fillText('Nhấn phím [P] hoặc [ESC] để tiếp tục chơi', this.canvas.width / 2, panelY + 115);
+    this.ctx.font = '19px sans-serif';
+    this.ctx.fillText('Nhấn phím [P] hoặc [ESC] để tiếp tục chơi', this.canvas.width / 2, panelY + 102);
 
     this.ctx.fillStyle = '#ff88aa';
-    this.ctx.font = '16px monospace';
-    this.ctx.fillText('Phím [1]: Sinh Tử Thần  |  Phím [2]: Sinh Gokucho', this.canvas.width / 2, panelY + 160);
-    this.ctx.fillText('Phím [4]: Nhận ngay 20 XP  |  Phím [5]: Max cấp vũ khí & Thả Rương', this.canvas.width / 2, panelY + 190);
+    this.ctx.font = '15px monospace';
+    this.ctx.fillText('Phím [1]: Sinh Tử Thần  |  Phím [2]: Sinh Gokucho  |  Phím [6]: Thức Tỉnh Witch', this.canvas.width / 2, panelY + 142);
+    this.ctx.fillText('Phím [4]: Nhận ngay 20 XP  |  Phím [5]: Max cấp vũ khí & Thả Rương Tiến Hóa', this.canvas.width / 2, panelY + 168);
+    this.ctx.fillStyle = '#4ade80';
+    this.ctx.fillText('⏩ Phím [7]: Tua +60s  |  ⏩ Phím [8]: Nhảy tới mốc Boss tiếp theo  |  ⏩ Phím [9]: Tua +3 phút', this.canvas.width / 2, panelY + 196);
 
     // Cập nhật vị trí các nút trong pauseActions
     const p = this.pauseActions;
@@ -1241,12 +1723,12 @@ class Game {
     this.ctx.textAlign = 'center';
     this.ctx.shadowColor = '#d4af37';
     this.ctx.shadowBlur = 30;
-    this.ctx.fillText('VAMPIRE SURVIVAL 2D', this.canvas.width / 2, 230);
+    this.ctx.fillText('WITCH ESCAPE', this.canvas.width / 2, 230);
 
     this.ctx.shadowBlur = 0;
     this.ctx.fillStyle = '#ff70a6';
     this.ctx.font = 'italic 26px "Segoe UI", sans-serif';
-    this.ctx.fillText('— Rừng Đêm Hắc Ám & Bão Kiếm Huyền Thoại —', this.canvas.width / 2, 290);
+    this.ctx.fillText('— Chạy Thoát Khỏi Hòn Đảo Phù Thủy —', this.canvas.width / 2, 290);
 
     // Thống kê Vàng và Kỷ lục
     const goldPanelX = this.canvas.width / 2 - 320;
@@ -1264,8 +1746,8 @@ class Game {
 
     // Các Nút Menu Chính
     const savedInfo = this.getSavedGameInfo();
-    const btnW = 460;
-    const btnH = 64;
+    const btnW = 480;
+    const btnH = 58;
     const btnX = this.canvas.width / 2 - btnW / 2;
 
     const buttons = [];
@@ -1276,16 +1758,18 @@ class Game {
       buttons.push({
         id: 'resume_saved_game',
         label: `▶️ TIẾP TỤC (Cấp ${savedInfo.level} - ⏱️ ${timeStr})`,
-        y: 425,
+        y: 415,
         color: '#1d4ed8',
         border: '#60a5fa'
       });
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 510, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 595, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 680, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 485, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 555, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 625, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 695, color: '#1e293b', border: '#475569' });
     } else {
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 460, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 560, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 435, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 510, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 585, color: '#854d0e', border: '#eab308' });
       buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 660, color: '#1e293b', border: '#475569' });
     }
 
@@ -1355,6 +1839,22 @@ class Game {
       this.ctx.font = 'italic 16px sans-serif';
       this.ctx.fillText(char.title, cx + cardW / 2, cardY + 82);
 
+      // Nút mở nhanh Cây Kỹ Năng của nhân vật
+      const treeBtnW = 145;
+      const treeBtnH = 32;
+      const treeBtnX = cx + cardW - treeBtnW - 16;
+      const treeBtnY = cardY + 16;
+      this.ctx.fillStyle = '#3b0764';
+      this.ctx.fillRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
+      this.ctx.strokeStyle = '#c084fc';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
+      this.ctx.fillStyle = '#f3e8ff';
+      this.ctx.font = 'bold 13px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('🌲 Cây Kỹ Năng', treeBtnX + treeBtnW / 2, treeBtnY + 21);
+      this.menuButtons.push({ x: treeBtnX, y: treeBtnY, w: treeBtnW, h: treeBtnH, id: `open_char_skill_tree_${char.id}` });
+
       // Khung vẽ ảnh nhân vật
       const avatarBoxX = cx + cardW / 2 - 70;
       const avatarBoxY = cardY + 105;
@@ -1365,12 +1865,25 @@ class Game {
 
       const charImg = getIconImage(char.sprite);
       if (charImg && charImg.complete) {
+        this.ctx.imageSmoothingEnabled = true;
         if (char.spriteSheet) {
           const fw = Math.floor(charImg.naturalWidth / char.spriteSheet.cols);
           const fh = Math.floor(charImg.naturalHeight / char.spriteSheet.rows);
           this.ctx.drawImage(charImg, 0, 0, fw, fh, avatarBoxX + 20, avatarBoxY + 20, 100, 100);
         } else {
-          this.ctx.drawImage(charImg, avatarBoxX + 25, avatarBoxY + 15, 90, 110);
+          const natW = charImg.naturalWidth || 1;
+          const natH = charImg.naturalHeight || 1;
+          const maxAvW = 120;
+          const maxAvH = 125;
+          let drawW = maxAvW;
+          let drawH = drawW * (natH / natW);
+          if (drawH > maxAvH) {
+            drawH = maxAvH;
+            drawW = drawH * (natW / natH);
+          }
+          const drawX = avatarBoxX + (140 - drawW) / 2;
+          const drawY = avatarBoxY + (140 - drawH) / 2;
+          this.ctx.drawImage(charImg, drawX, drawY, drawW, drawH);
         }
       }
 
@@ -1380,15 +1893,22 @@ class Game {
       this.ctx.font = '16px monospace';
       this.ctx.textAlign = 'left';
       this.ctx.fillText(`❤️ Máu tối đa: ${char.maxHealth}`, cx + 35, statY);
-      this.ctx.fillText(`👟 Tốc độ: ${char.baseSpeed}`, cx + 35, statY + 34);
-      this.ctx.fillText(`💥 Chí mạng: ${(char.critChance * 100).toFixed(0)}% (x${char.critDamage})`, cx + 35, statY + 68);
+      this.ctx.fillText(`👟 Tốc độ: ${char.baseSpeed}`, cx + 35, statY + 30);
+      this.ctx.fillText(`💥 Chí mạng: ${(char.critChance * 100).toFixed(0)}% (x${char.critDamage})`, cx + 35, statY + 60);
+
+      // Cấp Thông Thạo & Score của nhân vật
+      const mastery = this.masterySystem.getCharData(char.id);
+      this.ctx.fillStyle = '#fbbf24';
+      this.ctx.fillText(`⭐ Thông Thạo: Cấp ${mastery.level}/100`, cx + 35, statY + 90);
+      this.ctx.fillStyle = '#c084fc';
+      this.ctx.fillText(`🔮 Điểm Score: ${mastery.score.toLocaleString()}`, cx + 35, statY + 115);
 
       // Mô tả
       this.ctx.fillStyle = '#94a3b8';
       this.ctx.font = '15px sans-serif';
       const words = char.desc.split(' ');
       let line = '';
-      let descY = statY + 115;
+      let descY = statY + 145;
       for (const w of words) {
         const test = line + w + ' ';
         if (this.ctx.measureText(test).width > cardW - 70) {
@@ -1439,13 +1959,294 @@ class Game {
     this.ctx.fillText('⬅ QUAY LẠI', backBtnX + nextBtnW / 2, actionBtnY + 30);
     this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_menu' });
 
-    // Next
+    // Next (Sang Chọn Chế Độ Chơi)
     this.ctx.fillStyle = '#2d6a4f';
     this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
     this.ctx.strokeStyle = '#52b788';
     this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
     this.ctx.fillStyle = '#ffffff';
     this.ctx.fillText('TIẾP TỤC ➔', nextBtnX + nextBtnW / 2, actionBtnY + 30);
+    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_mode_select' });
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MÀN HÌNH CHỌN CHẾ ĐỘ CHƠI (BÌNH THƯỜNG / VÔ TẬN)
+  // =========================================================================
+  renderModeSelect() {
+    this.ctx.save();
+
+    this.ctx.fillStyle = '#0a0d18';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 52px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('CHỌN CHẾ ĐỘ THỬ THÁCH', this.canvas.width / 2, 95);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '20px sans-serif';
+    this.ctx.fillText('Lựa chọn chiến dịch sinh tồn 20 phút hoặc thử thách vô tận không giới hạn thời gian:', this.canvas.width / 2, 145);
+
+    const cardW = 560;
+    const cardH = 540;
+    const gap = 60;
+    const startX = (this.canvas.width - (cardW * CONFIG.MODES.length + gap * (CONFIG.MODES.length - 1))) / 2;
+    const cardY = 210;
+
+    for (let i = 0; i < CONFIG.MODES.length; i++) {
+      const mode = CONFIG.MODES[i];
+      const cx = startX + i * (cardW + gap);
+      const isSelected = this.selectedMode.id === mode.id;
+
+      this.ctx.fillStyle = isSelected ? 'rgba(25, 35, 55, 0.96)' : 'rgba(15, 23, 42, 0.85)';
+      this.ctx.fillRect(cx, cardY, cardW, cardH);
+      this.ctx.strokeStyle = isSelected ? mode.color : '#334155';
+      this.ctx.lineWidth = isSelected ? 3.5 : 1.5;
+      this.ctx.strokeRect(cx, cardY, cardW, cardH);
+
+      // Icon & Tag
+      this.ctx.font = '54px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(mode.icon, cx + cardW / 2, cardY + 75);
+
+      this.ctx.fillStyle = mode.color;
+      this.ctx.font = 'bold 16px monospace';
+      this.ctx.fillText(mode.tag, cx + cardW / 2, cardY + 115);
+
+      // Tên Chế Độ
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 28px "Segoe UI", sans-serif';
+      this.ctx.fillText(mode.name, cx + cardW / 2, cardY + 160);
+
+      // Đường kẻ phân cách
+      this.ctx.strokeStyle = '#334155';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(cx + 40, cardY + 195);
+      this.ctx.lineTo(cx + cardW - 40, cardY + 195);
+      this.ctx.stroke();
+
+      // Mô tả & Lộ trình
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = '17px sans-serif';
+      this.ctx.textAlign = 'left';
+
+      if (mode.id === 'normal') {
+        let textY = cardY + 235;
+        this.ctx.fillText('⏳ Thời lượng trận đấu: 20 Phút', cx + 45, textY);
+        this.ctx.fillText('💀 Phút 02:30: Mini Boss đầu tiên xuất hiện (to x2.5)', cx + 45, textY + 36);
+        this.ctx.fillText('👹 Phút 10:00: Đại Ma Nữ Meruru (Phase 1 & 2)', cx + 45, textY + 72);
+        this.ctx.fillText('🔥 Phút 20:00: Chúa Tể Yuki (3 Phase, 7 Kỹ Năng)', cx + 45, textY + 108);
+        this.ctx.fillStyle = '#4ade80';
+        this.ctx.fillText('🏆 Tiêu diệt Yuki để CHIẾN THẮNG TRẬN ĐẤU!', cx + 45, textY + 155);
+      } else {
+        let textY = cardY + 235;
+        this.ctx.fillText('♾️ Thời lượng trận đấu: KHÔNG GIỚI HẠN', cx + 45, textY);
+        this.ctx.fillText('🔄 Lặp lại toàn bộ chu kỳ Boss lần 2 tới phút 40', cx + 45, textY + 36);
+        this.ctx.fillText('🌊 Sau phút 40: Biển quái dồn dập tràn ngập bản đồ', cx + 45, textY + 72);
+        this.ctx.fillText('🪙 Cày Tiền Vàng & Phá Kỷ Lục Điểm Số Tối Thượng', cx + 45, textY + 108);
+        this.ctx.fillStyle = '#f43f5e';
+        this.ctx.fillText('⚠️ Thử thách sinh tồn khắc nghiệt cho cựu binh!', cx + 45, textY + 155);
+      }
+
+      // Nút Lựa Chọn
+      const selectBtnW = 280;
+      const selectBtnH = 54;
+      const selectBtnX = cx + cardW / 2 - selectBtnW / 2;
+      const selectBtnY = cardY + cardH - 80;
+
+      this.ctx.fillStyle = isSelected ? mode.color : '#1e293b';
+      this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+      this.ctx.strokeStyle = isSelected ? '#ffffff' : '#64748b';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+
+      this.ctx.fillStyle = isSelected ? '#000000' : '#ffffff';
+      this.ctx.font = 'bold 18px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN CHẾ ĐỘ NÀY', cx + cardW / 2, selectBtnY + 34);
+
+      this.menuButtons.push({ x: cx, y: cardY, w: cardW, h: cardH, id: 'select_mode_' + mode.id, modeData: mode });
+    }
+
+    // Nút Quay lại & Tiếp tục (Sang Chọn Thử Thách)
+    const nextBtnW = 260;
+    const nextBtnH = 56;
+    const nextBtnX = this.canvas.width / 2 + 25;
+    const backBtnX = this.canvas.width / 2 - nextBtnW - 25;
+    const actionBtnY = this.canvas.height - 110;
+
+    // Back
+    this.ctx.fillStyle = '#334155';
+    this.ctx.fillRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.strokeRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + nextBtnW / 2, actionBtnY + 34);
+    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_char_select' });
+
+    // Next
+    this.ctx.fillStyle = '#2d6a4f';
+    this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.strokeStyle = '#52b788';
+    this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText('TIẾP TỤC (THỬ THÁCH) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 34);
+    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_challenge_select' });
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MÀN HÌNH TÙY CHỌN THỬ THÁCH (CHALLENGE MODIFIERS)
+  // Bảng Checkbox tích chọn - Tăng Điểm & Vàng khi sống >= 2 phút
+  // =========================================================================
+  renderChallengeSelect() {
+    this.ctx.save();
+
+    this.ctx.fillStyle = '#0a0d18';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 48px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('THỬ THÁCH BỔ SUNG (TÙY CHỌN)', this.canvas.width / 2, 75);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '17px sans-serif';
+    this.ctx.fillText('Tích chọn các điều kiện khắc nghiệt để gia tăng độ khó và nhận thêm Điểm & Vàng thưởng:', this.canvas.width / 2, 115);
+
+    // Tính tổng bonus hiện tại
+    let totalScoreBonus = 0;
+    let totalGoldBonus = 0;
+    let checkedCount = 0;
+
+    for (const ch of CONFIG.CHALLENGES) {
+      if (this.selectedChallenges[ch.id]) {
+        totalScoreBonus += ch.scoreBonus;
+        totalGoldBonus += ch.goldBonus;
+        checkedCount++;
+      }
+    }
+
+    // Thanh hiển thị tổng Bonus
+    const summaryBarW = 900;
+    const summaryBarH = 46;
+    const summaryX = this.canvas.width / 2 - summaryBarW / 2;
+    const summaryY = 135;
+
+    this.ctx.fillStyle = 'rgba(25, 35, 55, 0.9)';
+    this.ctx.fillRect(summaryX, summaryY, summaryBarW, summaryBarH);
+    this.ctx.strokeStyle = checkedCount > 0 ? '#ffd700' : '#475569';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(summaryX, summaryY, summaryBarW, summaryBarH);
+
+    this.ctx.fillStyle = '#ffd700';
+    this.ctx.font = 'bold 18px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(
+      `ĐÃ CHỌN: ${checkedCount}/${CONFIG.CHALLENGES.length} Thử Thách    |    ⭐ Thưởng Điểm: +${Math.round(totalScoreBonus * 100)}%    |    🪙 Thưởng Vàng: +${Math.round(totalGoldBonus * 100)}%`,
+      this.canvas.width / 2,
+      summaryY + 29
+    );
+
+    // Chú thích chống farm bẩn
+    this.ctx.fillStyle = '#f87171';
+    this.ctx.font = 'italic 15px sans-serif';
+    this.ctx.fillText('⚠️ Điều kiện nhận thưởng: Bạn phải sống sót ít nhất 2 phút (120 giây) trong trận mới được kích hoạt bonus thử thách!', this.canvas.width / 2, summaryY + 68);
+
+    // Danh sách 11 Thử thách chia thành 2 cột cân xứng
+    const colW = 680;
+    const itemH = 68;
+    const gapX = 40;
+    const gapY = 12;
+    const totalW = colW * 2 + gapX;
+    const leftX = (this.canvas.width - totalW) / 2;
+    const startY = 225;
+
+    for (let i = 0; i < CONFIG.CHALLENGES.length; i++) {
+      const ch = CONFIG.CHALLENGES[i];
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+
+      const ix = leftX + col * (colW + gapX);
+      const iy = startY + row * (itemH + gapY);
+      const isChecked = !!this.selectedChallenges[ch.id];
+
+      // Nền ô thử thách
+      this.ctx.fillStyle = isChecked ? 'rgba(30, 41, 65, 0.95)' : 'rgba(15, 23, 42, 0.75)';
+      this.ctx.fillRect(ix, iy, colW, itemH);
+      this.ctx.strokeStyle = isChecked ? '#ffd166' : '#334155';
+      this.ctx.lineWidth = isChecked ? 2 : 1;
+      this.ctx.strokeRect(ix, iy, colW, itemH);
+
+      // Checkbox [✓] hoặc [ ]
+      const boxSize = 28;
+      const boxX = ix + 16;
+      const boxY = iy + (itemH - boxSize) / 2;
+
+      this.ctx.fillStyle = isChecked ? '#ffd700' : 'rgba(30, 40, 60, 0.9)';
+      this.ctx.fillRect(boxX, boxY, boxSize, boxSize);
+      this.ctx.strokeStyle = isChecked ? '#fff' : '#64748b';
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+
+      if (isChecked) {
+        this.ctx.fillStyle = '#000000';
+        this.ctx.font = 'bold 20px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('✓', boxX + boxSize / 2, boxY + 22);
+      }
+
+      // Tên Thử thách
+      this.ctx.fillStyle = isChecked ? '#ffea79' : '#f8fafc';
+      this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(ch.name, boxX + boxSize + 14, iy + 27);
+
+      // Mô tả ngắn
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '14px sans-serif';
+      this.ctx.fillText(ch.desc, boxX + boxSize + 14, iy + 51);
+
+      // Bonus hiển thị bên phải
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.font = 'bold 15px monospace';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`+${Math.round(ch.scoreBonus * 100)}% Điểm | +${Math.round(ch.goldBonus * 100)}% Vàng`, ix + colW - 16, iy + 39);
+
+      this.menuButtons.push({ x: ix, y: iy, w: colW, h: itemH, id: 'toggle_challenge_' + ch.id });
+    }
+
+    // 2 Nút: Quay lại & Tiếp tục (Sang Chọn Độ Khó)
+    const nextBtnW = 280;
+    const nextBtnH = 56;
+    const nextBtnX = this.canvas.width / 2 + 25;
+    const backBtnX = this.canvas.width / 2 - nextBtnW - 25;
+    const actionBtnY = this.canvas.height - 95;
+
+    // Back
+    this.ctx.fillStyle = '#334155';
+    this.ctx.fillRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.strokeRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⬅ QUAY LẠI (CHẾ ĐỘ)', backBtnX + nextBtnW / 2, actionBtnY + 34);
+    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_mode_select' });
+
+    // Next
+    this.ctx.fillStyle = '#2d6a4f';
+    this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.strokeStyle = '#52b788';
+    this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText('TIẾP TỤC (ĐỘ KHÓ) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 34);
     this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_diff_select' });
 
     this.ctx.restore();
@@ -1546,7 +2347,7 @@ class Game {
     this.ctx.font = 'bold 20px sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('⬅ QUAY LẠI', backBtnX + startBattleW / 2, actionBtnY + 39);
-    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'back_to_char_select' });
+    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'back_to_challenge_select' });
 
     // Start
     this.ctx.fillStyle = '#b91c1c';
@@ -1664,6 +2465,396 @@ class Game {
     this.ctx.restore();
   }
 
+  // =========================================================================
+  // GIAO DIỆN CÂY KỸ NĂNG VÀ THÔNG THẠO NHÂN VẬT (CHARACTER MASTERY & SKILL TREE)
+  // =========================================================================
+  renderSkillTree() {
+    this.ctx.save();
+
+    // Nền tối ma thuật huyền bí
+    this.ctx.fillStyle = '#080511';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Vầng hào quang ánh sáng ma thuật nền
+    const bgGrad = this.ctx.createRadialGradient(
+      this.canvas.width / 2, 280, 50,
+      this.canvas.width / 2, 400, 900
+    );
+    bgGrad.addColorStop(0, 'rgba(88, 28, 135, 0.28)');
+    bgGrad.addColorStop(1, 'rgba(8, 5, 17, 0)');
+    this.ctx.fillStyle = bgGrad;
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // 1. Tiêu Đề Chính
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 40px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.shadowColor = '#d946ef';
+    this.ctx.shadowBlur = 22;
+    this.ctx.fillText('✨ CÂY KỸ NĂNG & THÔNG THẠO NHÂN VẬT', this.canvas.width / 2, 48);
+
+    this.ctx.shadowBlur = 0;
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '15px sans-serif';
+    this.ctx.fillText('Dùng điểm Score tích lũy của nhân vật để tăng cấp Thông Thạo (Cấp 1 - 100) và nhận Điểm Kỹ Năng cường hóa vĩnh viễn', this.canvas.width / 2, 76);
+
+    // 2. Thanh Tabs Chuyển Đổi Nhân Vật
+    const tabW = 320;
+    const tabH = 46;
+    const tabGap = 25;
+    const totalTabW = tabW * CONFIG.CHARACTERS.length + tabGap * (CONFIG.CHARACTERS.length - 1);
+    const tabStartX = (this.canvas.width - totalTabW) / 2;
+    const tabY = 96;
+
+    for (let i = 0; i < CONFIG.CHARACTERS.length; i++) {
+      const c = CONFIG.CHARACTERS[i];
+      const tx = tabStartX + i * (tabW + tabGap);
+      const isTabSelected = (c.id === this.skillTreeSelectedCharId);
+      const cMastery = this.masterySystem.getCharData(c.id);
+
+      this.ctx.fillStyle = isTabSelected ? '#581c87' : 'rgba(20, 15, 35, 0.85)';
+      this.ctx.fillRect(tx, tabY, tabW, tabH);
+      this.ctx.strokeStyle = isTabSelected ? '#fbbf24' : '#475569';
+      this.ctx.lineWidth = isTabSelected ? 2.5 : 1.2;
+      this.ctx.strokeRect(tx, tabY, tabW, tabH);
+
+      this.ctx.fillStyle = isTabSelected ? '#fde047' : '#94a3b8';
+      this.ctx.font = isTabSelected ? 'bold 16px "Segoe UI", sans-serif' : '15px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(`${c.name} (Lv.${cMastery.level}/100)`, tx + tabW / 2, tabY + 29);
+
+      this.menuButtons.push({ x: tx, y: tabY, w: tabW, h: tabH, id: 'select_skill_char_' + c.id });
+    }
+
+    // 3. Khung Thông Tin Thông Thạo Nhân Vật Hiện Tại
+    const selectedCharConfig = CONFIG.CHARACTERS.find(c => c.id === this.skillTreeSelectedCharId) || CONFIG.CHARACTERS[0];
+    const charMastery = this.masterySystem.getCharData(selectedCharConfig.id);
+    const neededScore = this.masterySystem.getRequiredScore(charMastery.level);
+    const isMaxMastery = charMastery.level >= 100;
+    const canLevelUp = !isMaxMastery && charMastery.score >= neededScore;
+
+    const bannerX = 50;
+    const bannerY = 155;
+    const bannerW = this.canvas.width - 100;
+    const bannerH = 100;
+
+    this.ctx.fillStyle = 'rgba(22, 14, 40, 0.94)';
+    this.ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
+    this.ctx.strokeStyle = '#7c3aed';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(bannerX, bannerY, bannerW, bannerH);
+
+    // Cột 1 Banner: Avatar & Thông tin cơ bản
+    const avBoxX = bannerX + 18;
+    const avBoxY = bannerY + 12;
+    const avBoxSize = 76;
+    this.ctx.fillStyle = 'rgba(10, 5, 20, 0.7)';
+    this.ctx.fillRect(avBoxX, avBoxY, avBoxSize, avBoxSize);
+    this.ctx.strokeStyle = '#fbbf24';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(avBoxX, avBoxY, avBoxSize, avBoxSize);
+
+    const cImg = getIconImage(selectedCharConfig.sprite);
+    if (cImg && cImg.complete) {
+      if (selectedCharConfig.spriteSheet) {
+        const fw = Math.floor(cImg.naturalWidth / selectedCharConfig.spriteSheet.cols);
+        const fh = Math.floor(cImg.naturalHeight / selectedCharConfig.spriteSheet.rows);
+        this.ctx.drawImage(cImg, 0, 0, fw, fh, avBoxX + 10, avBoxY + 10, avBoxSize - 20, avBoxSize - 20);
+      } else {
+        this.ctx.drawImage(cImg, avBoxX + 12, avBoxY + 5, avBoxSize - 24, avBoxSize - 10);
+      }
+    }
+
+    const infoTextX = avBoxX + avBoxSize + 22;
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#ffea79';
+    this.ctx.font = 'bold 22px "Segoe UI", sans-serif';
+    this.ctx.fillText(selectedCharConfig.name, infoTextX, bannerY + 36);
+
+    this.ctx.fillStyle = '#c084fc';
+    this.ctx.font = 'italic 15px sans-serif';
+    this.ctx.fillText(selectedCharConfig.title, infoTextX, bannerY + 58);
+
+    this.ctx.fillStyle = '#f59e0b';
+    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+    this.ctx.fillText(`⭐ THÔNG THẠO: CẤP ${charMastery.level} / 100`, infoTextX, bannerY + 84);
+
+    // Cột 2 Banner: Thanh tiến trình Score & Nút Nâng Cấp Thông Thạo
+    const progX = bannerX + 540;
+    const progY = bannerY + 22;
+    const progW = 440;
+    const progH = 24;
+
+    this.ctx.fillStyle = '#e2e8f0';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.fillText(`Điểm Score Tích Lũy: ${charMastery.score.toLocaleString()} Score`, progX, progY - 8);
+
+    // Thanh đo
+    this.ctx.fillStyle = 'rgba(10, 8, 20, 0.9)';
+    this.ctx.fillRect(progX, progY, progW, progH);
+    const scoreRatio = isMaxMastery ? 1.0 : Math.min(1.0, charMastery.score / neededScore);
+    const barGrad = this.ctx.createLinearGradient(progX, 0, progX + progW, 0);
+    barGrad.addColorStop(0, '#7c3aed');
+    barGrad.addColorStop(1, '#eab308');
+    this.ctx.fillStyle = barGrad;
+    this.ctx.fillRect(progX, progY, progW * scoreRatio, progH);
+    this.ctx.strokeStyle = '#fbbf24';
+    this.ctx.lineWidth = 1.2;
+    this.ctx.strokeRect(progX, progY, progW, progH);
+
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 13px monospace';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(
+      isMaxMastery ? 'MAX CẤP THÔNG THẠO (100/100)' : `${charMastery.score.toLocaleString()} / ${neededScore.toLocaleString()} Score (${Math.floor(scoreRatio * 100)}%)`,
+      progX + progW / 2,
+      progY + 17
+    );
+
+    // Nút Nâng 1 Cấp
+    const upBtnW = 190;
+    const upBtnH = 44;
+    const upBtnX = progX + progW + 28;
+    const upBtnY = bannerY + 28;
+    this.ctx.fillStyle = canLevelUp ? '#15803d' : '#1e293b';
+    this.ctx.fillRect(upBtnX, upBtnY, upBtnW, upBtnH);
+    this.ctx.strokeStyle = canLevelUp ? '#4ade80' : '#475569';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(upBtnX, upBtnY, upBtnW, upBtnH);
+    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(isMaxMastery ? 'ĐÃ ĐẠT MAX' : '⬆️ NÂNG 1 CẤP', upBtnX + upBtnW / 2, upBtnY + 28);
+    if (canLevelUp) {
+      this.menuButtons.push({ x: upBtnX, y: upBtnY, w: upBtnW, h: upBtnH, id: 'level_up_mastery' });
+    }
+
+    // Nút Nâng Tối Đa
+    const maxBtnW = 160;
+    const maxBtnH = 44;
+    const maxBtnX = upBtnX + upBtnW + 15;
+    const maxBtnY = upBtnY;
+    this.ctx.fillStyle = canLevelUp ? '#b45309' : '#1e293b';
+    this.ctx.fillRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
+    this.ctx.strokeStyle = canLevelUp ? '#fde047' : '#475569';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
+    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🚀 NÂNG TỐI ĐA', maxBtnX + maxBtnW / 2, maxBtnY + 28);
+    if (canLevelUp) {
+      this.menuButtons.push({ x: maxBtnX, y: maxBtnY, w: maxBtnW, h: maxBtnH, id: 'level_up_max_mastery' });
+    }
+
+    // Cột 3 Banner: Điểm Kỹ Năng & Nút Reset
+    const skillBoxX = maxBtnX + maxBtnW + 35;
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#fde047';
+    this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    this.ctx.fillText(`🌟 ĐIỂM KỸ NĂNG: ${charMastery.skillPoints}`, skillBoxX, bannerY + 44);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '13px sans-serif';
+    this.ctx.fillText('1 Cấp Thông Thạo = 1 Điểm', skillBoxX, bannerY + 68);
+
+    const resetBtnW = 165;
+    const resetBtnH = 38;
+    const resetBtnX = bannerX + bannerW - resetBtnW - 18;
+    const resetBtnY = bannerY + 31;
+    this.ctx.fillStyle = '#831843';
+    this.ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
+    this.ctx.strokeStyle = '#f472b6';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 14px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🔄 TẨY ĐIỂM (RESET)', resetBtnX + resetBtnW / 2, resetBtnY + 24);
+    this.menuButtons.push({ x: resetBtnX, y: resetBtnY, w: resetBtnW, h: resetBtnH, id: 'reset_mastery_skills' });
+
+    // 4. Khu Vực Cây Kỹ Năng 3 Cột (Tấn Công - Sinh Tồn - Tiện Ích & Tinh Hoa)
+    const colW = 585;
+    const colGap = 32;
+    const colStartY = 272;
+    const colStartX = 50;
+
+    const columns = [
+      {
+        title: '⚔️ NHÁNH TẤN CÔNG (OFFENSE)',
+        color: '#dc2626',
+        borderColor: '#f87171',
+        skills: ['attack_dmg', 'crit_rate', 'crit_dmg', 'cooldown']
+      },
+      {
+        title: '🛡️ NHÁNH SINH TỒN (SURVIVAL)',
+        color: '#16a34a',
+        borderColor: '#4ade80',
+        skills: ['max_health', 'regen', 'armor', 'lifesteal']
+      },
+      {
+        title: '🌟 TIỆN ÍCH & TINH HOA (MASTERY)',
+        color: '#9333ea',
+        borderColor: '#c084fc',
+        skills: ['speed', 'pickup_range', 'greed', 'special']
+      }
+    ];
+
+    const cardH = 152;
+    const cardGap = 16;
+
+    for (let cIdx = 0; cIdx < columns.length; cIdx++) {
+      const col = columns[cIdx];
+      const colX = colStartX + cIdx * (colW + colGap);
+
+      // Header Nhánh
+      this.ctx.fillStyle = 'rgba(20, 15, 35, 0.9)';
+      this.ctx.fillRect(colX, colStartY, colW, 40);
+      this.ctx.strokeStyle = col.borderColor;
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(colX, colStartY, colW, 40);
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(col.title, colX + colW / 2, colStartY + 26);
+
+      // Vẽ từng Card kỹ năng trong nhánh
+      for (let sIdx = 0; sIdx < col.skills.length; sIdx++) {
+        const skillKey = col.skills[sIdx];
+        const def = SKILL_TREE_DEFINITIONS[skillKey];
+        const curLvl = charMastery.skills[skillKey] || 0;
+        const maxLvl = def.maxLevel;
+        const cardY = colStartY + 50 + sIdx * (cardH + cardGap);
+
+        // Khung Card
+        this.ctx.fillStyle = 'rgba(16, 12, 28, 0.95)';
+        this.ctx.fillRect(colX, cardY, colW, cardH);
+        this.ctx.strokeStyle = (curLvl > 0) ? col.borderColor : '#334155';
+        this.ctx.lineWidth = (curLvl > 0) ? 2 : 1.2;
+        this.ctx.strokeRect(colX, cardY, colW, cardH);
+
+        // Xử lý tên và mô tả đặc biệt nếu là kỹ năng Tinh Hoa Tối Thượng
+        let skillName = def.name;
+        let skillDesc = def.desc;
+        let skillEffectText = def.format(curLvl);
+
+        if (skillKey === 'special') {
+          const spDef = CHARACTER_SPECIAL_MASTERY[selectedCharConfig.id];
+          if (spDef) {
+            skillName = `👑 ${spDef.name}`;
+            skillDesc = spDef.desc;
+            skillEffectText = spDef.format(curLvl);
+          }
+        } else {
+          skillName = `${def.icon} ${def.name}`;
+        }
+
+        // Tên kỹ năng & Cấp độ
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = (curLvl > 0) ? '#fde047' : '#f8fafc';
+        this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+        this.ctx.fillText(skillName, colX + 18, cardY + 28);
+
+        this.ctx.textAlign = 'right';
+        this.ctx.fillStyle = (curLvl >= maxLvl) ? '#f59e0b' : '#94a3b8';
+        this.ctx.font = 'bold 16px monospace';
+        this.ctx.fillText(`Cấp ${curLvl} / ${maxLvl}`, colX + colW - 130, cardY + 28);
+
+        // 10 Vạch đo cấp độ (Pips)
+        const pipStartX = colX + 18;
+        const pipY = cardY + 38;
+        const pipW = 28;
+        const pipH = 8;
+        const pipGap = 5;
+
+        for (let p = 0; p < maxLvl; p++) {
+          const px = pipStartX + p * (pipW + pipGap);
+          const isFilled = p < curLvl;
+          this.ctx.fillStyle = isFilled ? col.borderColor : 'rgba(50, 40, 70, 0.6)';
+          this.ctx.fillRect(px, pipY, pipW, pipH);
+        }
+
+        // Mô tả chi tiết kỹ năng
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = '13px sans-serif';
+        // Tự wrap dòng cho mô tả
+        const words = skillDesc.split(' ');
+        let line = '';
+        let descY = cardY + 68;
+        for (const w of words) {
+          const test = line + w + ' ';
+          if (this.ctx.measureText(test).width > colW - 150) {
+            this.ctx.fillText(line, colX + 18, descY);
+            line = w + ' ';
+            descY += 18;
+          } else {
+            line = test;
+          }
+        }
+        this.ctx.fillText(line, colX + 18, descY);
+
+        // Hiệu quả hiện tại
+        this.ctx.fillStyle = (curLvl > 0) ? '#4ade80' : '#64748b';
+        this.ctx.font = 'bold 13px sans-serif';
+        this.ctx.fillText(`⚡ Hiệu quả: ${skillEffectText}`, colX + 18, cardY + cardH - 12);
+
+        // Nút Nâng Điểm [+]
+        const addBtnW = 105;
+        const addBtnH = 46;
+        const addBtnX = colX + colW - addBtnW - 14;
+        const addBtnY = cardY + 52;
+        const canAddPoint = (charMastery.skillPoints > 0 && curLvl < maxLvl);
+
+        if (curLvl >= maxLvl) {
+          this.ctx.fillStyle = '#1e293b';
+          this.ctx.fillRect(addBtnX, addBtnY, addBtnW, addBtnH);
+          this.ctx.strokeStyle = '#475569';
+          this.ctx.lineWidth = 1.5;
+          this.ctx.strokeRect(addBtnX, addBtnY, addBtnW, addBtnH);
+          this.ctx.fillStyle = '#f59e0b';
+          this.ctx.font = 'bold 15px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText('ĐÃ MAX', addBtnX + addBtnW / 2, addBtnY + 29);
+        } else {
+          this.ctx.fillStyle = canAddPoint ? '#6d28d9' : '#1e293b';
+          this.ctx.fillRect(addBtnX, addBtnY, addBtnW, addBtnH);
+          this.ctx.strokeStyle = canAddPoint ? '#fbbf24' : '#334155';
+          this.ctx.lineWidth = canAddPoint ? 2 : 1;
+          this.ctx.strokeRect(addBtnX, addBtnY, addBtnW, addBtnH);
+          this.ctx.fillStyle = canAddPoint ? '#ffffff' : '#64748b';
+          this.ctx.font = 'bold 15px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText('[+] NÂNG', addBtnX + addBtnW / 2, addBtnY + 29);
+
+          if (canAddPoint) {
+            this.menuButtons.push({ x: addBtnX, y: addBtnY, w: addBtnW, h: addBtnH, id: 'allocate_skill_' + skillKey });
+          }
+        }
+      }
+    }
+
+    // 5. Nút Quay Lại Menu Chính
+    const bBtnW = 340;
+    const bBtnH = 52;
+    const bBtnX = this.canvas.width / 2 - bBtnW / 2;
+    const bBtnY = this.canvas.height - 70;
+
+    this.ctx.fillStyle = '#1e1b2e';
+    this.ctx.fillRect(bBtnX, bBtnY, bBtnW, bBtnH);
+    this.ctx.strokeStyle = '#94a3b8';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(bBtnX, bBtnY, bBtnW, bBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 18px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', bBtnX + bBtnW / 2, bBtnY + 33);
+    this.menuButtons.push({ x: bBtnX, y: bBtnY, w: bBtnW, h: bBtnH, id: 'back_from_skill_tree' });
+
+    this.ctx.restore();
+  }
+
   // MÀN HÌNH TỔNG KẾT CUỐI TRẬN (1080p Full HD)
   renderGameOver() {
     this.ctx.save();
@@ -1671,87 +2862,126 @@ class Game {
     this.ctx.fillStyle = 'rgba(10, 5, 8, 0.94)';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    this.ctx.fillStyle = '#ff3344';
-    this.ctx.font = 'bold 64px "Segoe UI", serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.shadowColor = '#ff0000';
-    this.ctx.shadowBlur = 24;
-    this.ctx.fillText('KẾT THÚC TRẬN ĐẤU', this.canvas.width / 2, 120);
-    this.ctx.shadowBlur = 0;
+    const s = this.endGameStats;
+
+    if (s.isVictory) {
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.font = 'bold 64px "Segoe UI", serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.shadowColor = '#d4af37';
+      this.ctx.shadowBlur = 30;
+      this.ctx.fillText('🏆 CHIẾN THẮNG QUANG VINH! 🏆', this.canvas.width / 2, 110);
+      this.ctx.shadowBlur = 0;
+
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.font = 'italic 22px "Segoe UI", sans-serif';
+      this.ctx.fillText('— Bạn đã kiên cường sống sót 20 phút và tiêu diệt Chúa Tể Yuki! —', this.canvas.width / 2, 155);
+    } else {
+      this.ctx.fillStyle = '#ff3344';
+      this.ctx.font = 'bold 64px "Segoe UI", serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.shadowColor = '#ff0000';
+      this.ctx.shadowBlur = 24;
+      this.ctx.fillText('KẾT THÚC TRẬN ĐẤU', this.canvas.width / 2, 115);
+      this.ctx.shadowBlur = 0;
+    }
 
     // Bảng thống kê chi tiết điểm số & vàng
-    const statBoxW = 760;
-    const statBoxH = 460;
+    const statBoxW = 820;
+    const statBoxH = 540;
     const statBoxX = this.canvas.width / 2 - statBoxW / 2;
-    const statBoxY = 180;
+    const statBoxY = 160;
 
     this.ctx.fillStyle = 'rgba(20, 24, 36, 0.96)';
     this.ctx.fillRect(statBoxX, statBoxY, statBoxW, statBoxH);
-    this.ctx.strokeStyle = '#d4af37';
+    this.ctx.strokeStyle = s.isVictory ? '#ffd700' : '#d4af37';
     this.ctx.lineWidth = 2.5;
     this.ctx.strokeRect(statBoxX, statBoxY, statBoxW, statBoxH);
 
-    const s = this.endGameStats;
     const minutes = Math.floor(s.survivalTime / 60);
     const seconds = Math.floor(s.survivalTime % 60);
 
-    const leftX = statBoxX + 60;
-    let textY = statBoxY + 65;
+    const leftX = statBoxX + 50;
+    let textY = statBoxY + 55;
 
-    this.ctx.font = '22px "Segoe UI", sans-serif';
+    this.ctx.font = '21px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`⏱️ Thời gian sống sót:`, leftX, textY);
     this.ctx.fillStyle = '#ffffff';
     this.ctx.fillText(`${minutes} phút ${seconds} giây`, leftX + 340, textY);
 
-    textY += 50;
+    textY += 44;
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`💀 Số quái vật tiêu diệt:`, leftX, textY);
     this.ctx.fillStyle = '#ff88aa';
     this.ctx.fillText(`${s.kills} quái`, leftX + 340, textY);
 
-    textY += 50;
+    textY += 44;
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`⭐ Cấp độ đạt được:`, leftX, textY);
     this.ctx.fillStyle = '#00b4d8';
     this.ctx.fillText(`Cấp ${s.level}`, leftX + 340, textY);
 
-    textY += 50;
+    textY += 44;
     this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.fillText(`⚔️ Cấp độ thử thách:`, leftX, textY);
+    this.ctx.fillText(`⚔️ Chế độ & Độ khó:`, leftX, textY);
     this.ctx.fillStyle = this.selectedDiff.color;
-    this.ctx.fillText(`${this.selectedDiff.name}`, leftX + 340, textY);
+    this.ctx.fillText(`${this.selectedMode.name} - ${this.selectedDiff.name}`, leftX + 340, textY);
+
+    textY += 44;
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.fillText(`🔥 Thưởng Thử Thách:`, leftX, textY);
+    if (s.qualifiedForChallengeBonus && s.challengeScoreBonus > 0) {
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.fillText(`+${Math.round(s.challengeScoreBonus * 100)}% Điểm  |  +${Math.round(s.challengeGoldBonus * 100)}% Vàng`, leftX + 340, textY);
+    } else if (!s.qualifiedForChallengeBonus && (s.activeChallenges && s.activeChallenges.length > 0)) {
+      this.ctx.fillStyle = '#f87171';
+      this.ctx.fillText(`Chưa đạt 2 phút (không kích hoạt bonus)`, leftX + 340, textY);
+    } else {
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.fillText(`Không có thử thách`, leftX + 340, textY);
+    }
 
     // Đường kẻ phân cách
-    textY += 35;
+    textY += 30;
     this.ctx.strokeStyle = '#3a4d6b';
     this.ctx.lineWidth = 1.5;
     this.ctx.beginPath();
     this.ctx.moveTo(leftX, textY);
-    this.ctx.lineTo(leftX + 640, textY);
+    this.ctx.lineTo(leftX + 720, textY);
     this.ctx.stroke();
 
     // Điểm số & Tiền thưởng
-    textY += 50;
+    textY += 46;
     this.ctx.font = 'bold 26px "Segoe UI", sans-serif';
     this.ctx.fillStyle = '#ffd166';
     this.ctx.fillText(`🏆 TỔNG ĐIỂM SỐ:`, leftX, textY);
     this.ctx.fillStyle = '#ffffff';
     this.ctx.fillText(`${s.score.toLocaleString()} ĐIỂM`, leftX + 340, textY);
 
-    textY += 48;
+    textY += 44;
     this.ctx.fillStyle = '#ffd700';
     this.ctx.fillText(`🪙 VÀNG THU THẬP:`, leftX, textY);
     this.ctx.fillStyle = '#ffe600';
     this.ctx.fillText(`+${s.goldEarned} Vàng`, leftX + 340, textY);
+
+    textY += 44;
+    this.ctx.fillStyle = '#c084fc';
+    this.ctx.fillText(`🔮 THÔNG THẠO (${s.charName || 'Nhân Vật'}):`, leftX, textY);
+    this.ctx.fillStyle = '#fde047';
+    if (s.charMastery) {
+      this.ctx.fillText(`+${s.score.toLocaleString()} Score (Cấp ${s.charMastery.level}/100)`, leftX + 340, textY);
+    } else {
+      this.ctx.fillText(`+${s.score.toLocaleString()} Score`, leftX + 340, textY);
+    }
 
     // 2 Nút: Chơi Lại hoặc Về Menu Chính
     const btnW = 320;
     const btnH = 62;
     const retryBtnX = this.canvas.width / 2 + 20;
     const menuBtnX = this.canvas.width / 2 - btnW - 20;
-    const btnY = statBoxY + statBoxH + 45;
+    const btnY = statBoxY + statBoxH + 35;
 
     // Về Menu
     this.ctx.fillStyle = '#334155';

@@ -288,7 +288,7 @@ export class Enemy {
       ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
 
       const healthPercent = Math.max(0, this.health / this.maxHealth);
-      ctx.fillStyle = this.isElite ? '#c844f0' : '#e63946';
+      ctx.fillStyle = '#e63946'; // Đồng bộ thanh máu màu đỏ chuẩn cho tất cả quái
       ctx.fillRect(barX, barY, barW * healthPercent, barH);
 
       // Hiện số stack Bleed nếu đang chảy máu

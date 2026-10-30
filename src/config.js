@@ -25,17 +25,19 @@ export const CONFIG = {
   CHARACTERS: [
     {
       id: 'sorceress',
-      name: 'Nữ Pháp Sư Pha Lê',
-      title: 'Pháp Sư Huyền Bí',
-      desc: 'Sở hữu Kiếm Pha Lê Hồng bắn tỉa chính xác. Tốc độ cân bằng và chí mạng tốt.',
-      sprite: 'assets/characters/pxArt (1).png',
+      name: 'Nikaido Hiro',
+      title: 'Phù Thủy',
+      desc: '1 người có khả năng quay ngược thời gian khi chết',
+      sprite: 'character/hiro.png',
+      witchSprite: 'character/hiro1.png',
       width: 48,
-      height: 96,
+      height: 100,
       maxHealth: 100,
       baseSpeed: 230,
       critChance: 0.05,
       critDamage: 2.0,
-      startingWeaponId: 'main_sword'
+      startingWeaponId: 'main_sword',
+      witchKillRequirement: 100
     },
     {
       id: 'dark_knight',
@@ -103,6 +105,110 @@ export const CONFIG = {
       spawnRateMult: 1.70,
       scoreMult: 2.2,
       goldMult: 2.2
+    }
+  ],
+
+  // Cấu hình Chế Độ Chơi (Game Modes)
+  MODES: [
+    {
+      id: 'normal',
+      name: 'Chiến Dịch Sinh Tồn (20 Phút)',
+      tag: '⏱️ CHIẾN DỊCH CHUẨN',
+      desc: 'Sống sót 20 phút qua các đợt bão quái và Mini Boss. Tiêu diệt 2 Đại Ma Nữ Meruru (10p) và Yuki (20p) để giành chiến thắng vẻ vang!',
+      icon: '🛡️',
+      color: '#38bdf8',
+      timeLimit: 1200 // 20 phút
+    },
+    {
+      id: 'endless',
+      name: 'Địa Ngục Vô Tận (Endless)',
+      tag: '♾️ KHÔNG GIỚI HẠN',
+      desc: 'Không giới hạn thời gian! Boss và quái lặp lại chu kỳ 2 lần tới phút 40, sau đó toàn bộ bản đồ sẽ bị bao phủ bởi biển quái vô tận cực hung bạo.',
+      icon: '🔥',
+      color: '#f43f5e',
+      timeLimit: 0
+    }
+  ],
+
+  // Hệ thống Thử Thách Bổ Sung (Challenge Modifiers)
+  // Tích chọn để tăng hệ số thưởng Điểm & Vàng (Chỉ nhận thưởng nếu sống sót >= 2 phút)
+  CHALLENGES: [
+    {
+      id: 'lock_weapon',
+      name: '🔒 Khóa 1 Ô Tấn Công',
+      desc: 'Chỉ được trang bị tối đa 4 vũ khí tấn công.',
+      scoreBonus: 0.15,
+      goldBonus: 0.15
+    },
+    {
+      id: 'lock_defense',
+      name: '🔒 Khóa 1 Ô Phòng Thủ',
+      desc: 'Chỉ được trang bị tối đa 3 trang bị phòng thủ.',
+      scoreBonus: 0.12,
+      goldBonus: 0.12
+    },
+    {
+      id: 'lock_utility',
+      name: '🔒 Khóa 1 Ô Đa Dụng',
+      desc: 'Chỉ được trang bị tối đa 2 trang bị đa dụng.',
+      scoreBonus: 0.10,
+      goldBonus: 0.10
+    },
+    {
+      id: 'no_heal',
+      name: '🚫 Không Thể Hồi Máu',
+      desc: 'Vô hiệu hóa toàn bộ kỹ năng, trang bị và bình máu hồi phục.',
+      scoreBonus: 0.40,
+      goldBonus: 0.40
+    },
+    {
+      id: 'less_damage',
+      name: '🗡️ Giảm 50% Sát Thương',
+      desc: 'Mọi đòn đánh chỉ gây ra một nửa lượng sát thương thông thường.',
+      scoreBonus: 0.35,
+      goldBonus: 0.35
+    },
+    {
+      id: 'less_health',
+      name: '💔 Giảm 50% Máu Tối Đa',
+      desc: 'Lượng máu tối đa bị giảm 50% so với ban đầu.',
+      scoreBonus: 0.25,
+      goldBonus: 0.25
+    },
+    {
+      id: 'less_speed',
+      name: '🐢 Giảm 40% Tốc Độ',
+      desc: 'Tốc độ di chuyển của nhân vật bị giảm 40%.',
+      scoreBonus: 0.30,
+      goldBonus: 0.30
+    },
+    {
+      id: 'more_incoming_damage',
+      name: '🛡️ Nhận Thêm 50% Sát Thương',
+      desc: 'Chịu thêm 50% sát thương từ mọi nguồn đòn đánh của kẻ địch.',
+      scoreBonus: 0.30,
+      goldBonus: 0.30
+    },
+    {
+      id: 'enemy_hp_x10',
+      name: '🧟 Quái Vật Gấp 10 Máu',
+      desc: 'Toàn bộ quái vật và Boss sở hữu lượng máu gấp 10 lần.',
+      scoreBonus: 0.60,
+      goldBonus: 0.60
+    },
+    {
+      id: 'enemy_count_x4',
+      name: '👥 Quái Vật Đông Gấp 4 Lần',
+      desc: 'Mật độ và tần suất xuất hiện của quái vật dồn dập gấp 4 lần.',
+      scoreBonus: 0.50,
+      goldBonus: 0.50
+    },
+    {
+      id: 'one_hit_death',
+      name: '⚡ Tử Địa: Đúng 1 Máu (1 HP)',
+      desc: 'Nhân vật chỉ có đúng 1 Máu duy nhất - Trúng đòn là ngã xuống ngay!',
+      scoreBonus: 0.80,
+      goldBonus: 0.80
     }
   ],
 

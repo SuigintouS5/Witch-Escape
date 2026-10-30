@@ -57,6 +57,74 @@ export class UpgradeManager {
     // Trạng thái Tiến Hóa Vũ Khí (Evolutions)
     this.canEvolve = false;
     this.availableEvolutions = [];
+
+    // Trạng thái Khóa Ô ngẫu nhiên trong 10s (Skill 7 của Chúa Tể Yuki)
+    this.tempLockedSlot = null; // { category, id, name, timer, maxDuration }
+  }
+
+  // Áp dụng Thử Thách khóa ô vĩnh viễn trong trận
+  applyChallenges(challenges = {}) {
+    if (challenges.lock_weapon) {
+      this.maxAttackSlots = 4; // Khóa 1 ô vũ khí (còn 4)
+    }
+    if (challenges.lock_defense) {
+      this.maxDefenseSlots = 3; // Khóa 1 ô phòng thủ (còn 3)
+    }
+    if (challenges.lock_utility) {
+      this.maxUtilitySlots = 2; // Khóa 1 ô đa dụng (còn 2)
+    }
+  }
+
+  // Khóa ngẫu nhiên 1 ô nâng cấp trong 10 giây (Skill 7 của Yuki)
+  lockRandomSlot(duration = 10.0) {
+    const candidates = [];
+
+    for (const w of this.attackSlots) {
+      candidates.push({ category: 'attack', ref: w, id: w.id, name: w.name });
+    }
+    for (const d of this.defenseSlots) {
+      candidates.push({ category: 'defense', ref: d, id: d.id, name: d.name });
+    }
+    for (const u of this.utilitySlots) {
+      candidates.push({ category: 'utility', ref: u, id: u.id, name: u.name });
+    }
+
+    if (candidates.length === 0) return;
+
+    // Reset slot cũ nếu có
+    if (this.tempLockedSlot) {
+      this.clearLockedSlot();
+    }
+
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    this.tempLockedSlot = {
+      category: chosen.category,
+      id: chosen.id,
+      name: chosen.name,
+      ref: chosen.ref,
+      timer: duration,
+      maxDuration: duration
+    };
+
+    if (chosen.ref) {
+      chosen.ref.isLocked = true;
+    }
+  }
+
+  clearLockedSlot() {
+    if (this.tempLockedSlot && this.tempLockedSlot.ref) {
+      this.tempLockedSlot.ref.isLocked = false;
+    }
+    this.tempLockedSlot = null;
+  }
+
+  update(delta) {
+    if (this.tempLockedSlot) {
+      this.tempLockedSlot.timer -= delta;
+      if (this.tempLockedSlot.timer <= 0) {
+        this.clearLockedSlot();
+      }
+    }
   }
 
   // Lấy 3 lựa chọn nâng cấp ngẫu nhiên khi Lên Cấp (Level Up)
@@ -71,7 +139,8 @@ export class UpgradeManager {
         id: 'extraLife',
         name: `⭐ ${skills.extraLife.name}`,
         desc: skills.extraLife.desc,
-        icon: skills.extraLife.icon
+        icon: skills.extraLife.icon,
+        weight: 1.0
       });
     }
     if (!skills.bloodPact.unlocked) {
@@ -80,7 +149,8 @@ export class UpgradeManager {
         id: 'bloodPact',
         name: `⭐ ${skills.bloodPact.name}`,
         desc: skills.bloodPact.desc,
-        icon: skills.bloodPact.icon
+        icon: skills.bloodPact.icon,
+        weight: 1.0
       });
     }
     if (!skills.lifesteal.unlocked) {
@@ -89,11 +159,13 @@ export class UpgradeManager {
         id: 'lifesteal',
         name: `⭐ ${skills.lifesteal.name}`,
         desc: skills.lifesteal.desc,
-        icon: skills.lifesteal.icon
+        icon: skills.lifesteal.icon,
+        weight: 1.0
       });
     }
 
     // 2. Nâng cấp các Vũ khí Tấn công hiện có (< cấp 7)
+    // Vũ khí chính (Kiếm Nghi Lễ / Slot đầu tiên) có tỉ lệ xuất hiện cao hơn 30% (weight: 1.3)
     for (const w of this.attackSlots) {
       if (w.level < w.maxLevel) {
         const nextLvl = w.level + 1;
@@ -101,30 +173,35 @@ export class UpgradeManager {
           ? WEAPON_UPGRADE_DETAILS[w.id][nextLvl]
           : `Tăng cường sức mạnh vũ khí lên Cấp ${nextLvl}/${w.maxLevel}.`;
 
+        const isMainWeapon = (w.id === 'main_sword' || (this.attackSlots.length > 0 && w.id === this.attackSlots[0].id));
+
         choices.push({
           category: 'weapon_upgrade',
           id: w.id,
           name: `⚔️ ${w.name} (Cấp ${nextLvl})`,
           desc: details,
           icon: w.icon,
-          weaponRef: w
+          weaponRef: w,
+          weight: isMainWeapon ? 1.30 : 1.00
         });
       }
     }
 
-    // 3. Mua thêm Vũ khí Tấn công mới (nếu slot tấn công < 4)
+    // 3. Mua thêm Vũ khí Tấn công mới (nếu slot tấn công < 5)
     if (this.attackSlots.length < this.maxAttackSlots) {
       for (const Cls of this.availableWeaponConstructors) {
         const dummy = new Cls();
         const alreadyHave = this.attackSlots.some(w => w.id === dummy.id);
         if (!alreadyHave) {
+          const isMainWeapon = (dummy.id === 'main_sword');
           choices.push({
             category: 'new_weapon',
             id: dummy.id,
             name: `⚔️ [Mới] ${dummy.name}`,
             desc: dummy.desc,
             icon: dummy.icon,
-            constructor: Cls
+            constructor: Cls,
+            weight: isMainWeapon ? 1.30 : 1.00
           });
         }
       }
@@ -142,7 +219,8 @@ export class UpgradeManager {
           name: `🛡️ ${item.name} (Cấp ${item.level + 1})`,
           desc: item.desc,
           icon: item.icon,
-          itemRef: item
+          itemRef: item,
+          weight: 1.00
         });
       } else if (!equipped && this.defenseSlots.length < this.maxDefenseSlots) {
         choices.push({
@@ -151,7 +229,8 @@ export class UpgradeManager {
           name: `🛡️ [Mới] ${item.name}`,
           desc: item.desc,
           icon: item.icon,
-          itemRef: item
+          itemRef: item,
+          weight: 1.00
         });
       }
     }
@@ -168,7 +247,8 @@ export class UpgradeManager {
           name: `🧲 ${item.name} (Cấp ${item.level + 1})`,
           desc: item.desc,
           icon: item.icon,
-          itemRef: item
+          itemRef: item,
+          weight: 1.00
         });
       } else if (!equipped && this.utilitySlots.length < this.maxUtilitySlots) {
         choices.push({
@@ -177,14 +257,34 @@ export class UpgradeManager {
           name: `🧲 [Mới] ${item.name}`,
           desc: item.desc,
           icon: item.icon,
-          itemRef: item
+          itemRef: item,
+          weight: 1.00
         });
       }
     }
 
-    // Xáo trộn ngẫu nhiên và lấy ra 3 lựa chọn
-    choices.sort(() => Math.random() - 0.5);
-    return choices.slice(0, 3);
+    // Rút 3 lựa chọn ngẫu nhiên có trọng số (Weighted Random Sampling without replacement)
+    // Vũ khí chính có trọng số 1.30 (+30% tỉ lệ so với 1.00 của các lựa chọn khác)
+    const selected = [];
+    const pool = [...choices];
+    const targetCount = Math.min(3, pool.length);
+
+    while (selected.length < targetCount && pool.length > 0) {
+      const totalWeight = pool.reduce((sum, item) => sum + (item.weight || 1.00), 0);
+      let rand = Math.random() * totalWeight;
+      let pickedIndex = 0;
+      for (let i = 0; i < pool.length; i++) {
+        rand -= (pool[i].weight || 1.00);
+        if (rand <= 0) {
+          pickedIndex = i;
+          break;
+        }
+      }
+      selected.push(pool[pickedIndex]);
+      pool.splice(pickedIndex, 1);
+    }
+
+    return selected;
   }
 
   // Áp dụng lựa chọn người chơi bấm vào
@@ -281,7 +381,7 @@ export class UpgradeManager {
   // Tính toán chỉ số phòng thủ
   getDamageReduction() {
     const armor = this.passivePool.armor;
-    if (armor.level > 0) {
+    if (armor.level > 0 && !armor.isLocked) {
       return Math.min(0.50, armor.level * 0.05); // Tối đa -35% đến -50%
     }
     return 0;
@@ -290,6 +390,7 @@ export class UpgradeManager {
   getMagnetRadius() {
     const base = 140;
     const magnet = this.passivePool.magnet;
+    if (magnet && magnet.isLocked) return base;
     return base * (1.0 + magnet.level * 0.25);
   }
 

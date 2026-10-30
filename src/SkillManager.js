@@ -51,6 +51,15 @@ export class SkillManager {
     return mult;
   }
 
+  // Đếm số lượng kỹ năng riêng đã mở khóa
+  getUnlockedCount() {
+    let count = 0;
+    if (this.skills.extraLife.unlocked) count++;
+    if (this.skills.bloodPact.unlocked) count++;
+    if (this.skills.lifesteal.unlocked) count++;
+    return count;
+  }
+
   onDamageDealt(damage, player) {
     if (!this.skills.lifesteal.unlocked || player.isDead) return;
 
@@ -66,8 +75,18 @@ export class SkillManager {
     if (this.skills.extraLife.unlocked && this.skills.extraLife.livesRemaining > 0) {
       this.skills.extraLife.livesRemaining--;
       player.isDead = false;
-      player.health = Math.round(player.maxHealth * 0.60);
-      player.invincibilityTimer = 2.0;
+
+      let healPercent = 0.60;
+      let invincibility = 2.0;
+
+      // Kỹ năng Tinh Hoa Thông Thạo: Thời Không Bất Diệt của Nikaido Hiro
+      if (player.charConfig && player.charConfig.id === 'sorceress' && player.specialMasteryLevel > 0) {
+        healPercent += player.specialMasteryLevel * 0.08; // Hồi thêm +8%/cấp
+        invincibility += player.specialMasteryLevel * 0.4; // Thêm +0.4s bất tử/cấp
+      }
+
+      player.health = Math.min(player.maxHealth, Math.round(player.maxHealth * healPercent));
+      player.invincibilityTimer = invincibility;
 
       if (particles) {
         particles.createDeathBurst(player.x, player.y, '#ffd166', 36);
