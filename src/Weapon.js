@@ -106,9 +106,9 @@ export class MainSwordWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    // Chỉ số cơ bản
-    this.baseDamage = 32;
-    this.damage = 32;
+    // Chỉ số cơ bản (Scale x10)
+    this.baseDamage = 320;
+    this.damage = 320;
     this.cooldown = 0.85;
     this.timer = 0.2;
     this.range = 480;
@@ -172,16 +172,29 @@ export class MainSwordWeapon {
             if (e.isDead) continue;
             const d = Math.hypot(e.x - player.x, e.y - player.y);
             if (d <= slashRadius + e.getHitboxRadius()) {
-              const { damage: slashDmg, isCrit } = player.rollDamage ? player.rollDamage(baseSlashDmg) : { damage: baseSlashDmg, isCrit: false };
-              e.takeDamage(slashDmg);
-              particles.createDamageNumber(e.x, e.y, slashDmg, isCrit);
+              const rolled = player.rollDamage ? player.rollDamage(baseSlashDmg) : { damage: baseSlashDmg, isCrit: false, isTrueDamage: false };
+              const hit = e.takeDamage(rolled.damage, {
+                isTrueDamage: rolled.isTrueDamage,
+                armorPenFlat: rolled.armorPenFlat,
+                armorPenPercent: rolled.armorPenPercent,
+                attackerAccuracy: rolled.accuracy,
+                isCrit: rolled.isCrit
+              }, particles);
+
+              if (hit > 0) {
+                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+              }
+
               // Đẩy lùi 20%
               const push = 35;
               e.x += ((e.x - player.x) / (d || 1)) * push;
               e.y += ((e.y - player.y) / (d || 1)) * push;
-              // DOT Xuất huyết (Bleed)
-              e.bleedTimer = 5.0;
-              e.bleedStacks = Math.min(10, (e.bleedStacks || 0) + 1);
+              // DOT Xuất huyết (Bleed) - Kiểm tra tỉ lệ với Né tránh
+              const canBleed = e.canApplyEffect ? e.canApplyEffect(1.0, player.accuracy) : true;
+              if (canBleed) {
+                e.bleedTimer = 5.0;
+                e.bleedStacks = Math.min(10, (e.bleedStacks || 0) + 1);
+              }
 
               if (e.isDead && onEnemyKill) {
                 const burstColor = (e.config && e.config.color) || '#a040b0';
@@ -243,7 +256,7 @@ export class OrbitingBladesWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    this.damage = 18;
+    this.damage = 180;
     this.count = 1;
     this.radius = 95;
     this.speed = 3.2; // Tốc độ góc
@@ -304,10 +317,19 @@ export class OrbitingBladesWeapon {
         const dist = Math.hypot(bladeX - enemy.x, bladeY - enemy.y);
         if (dist <= this.bladeSize + enemy.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
-          const { damage: actualDmg, isCrit } = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-          enemy.takeDamage(actualDmg);
-          particles.createHitSparks(bladeX, bladeY, isCrit ? 10 : 6);
-          particles.createDamageNumber(enemy.x, enemy.y, actualDmg, isCrit);
+          const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
+          const hit = enemy.takeDamage(rolled.damage, {
+            isTrueDamage: rolled.isTrueDamage,
+            armorPenFlat: rolled.armorPenFlat,
+            armorPenPercent: rolled.armorPenPercent,
+            attackerAccuracy: rolled.accuracy,
+            isCrit: rolled.isCrit
+          }, particles);
+
+          if (hit > 0) {
+            particles.createHitSparks(bladeX, bladeY, rolled.isCrit ? 10 : 6);
+            particles.createDamageNumber(enemy.x, enemy.y, hit, rolled.isCrit, rolled.isTrueDamage);
+          }
 
           this.hitCooldowns.set(enemy, 0.35); // 0.35s sau mới trúng tiếp
 
@@ -368,7 +390,7 @@ export class HolyAuraWeapon {
     this.type = 'attack';
 
     this.radius = 120;
-    this.damage = 12;
+    this.damage = 80;
     this.tickInterval = 0.5;
     this.tickTimer = 0.5;
     this.slowEffect = 0; // Làm chậm
@@ -439,15 +461,32 @@ export class HolyAuraWeapon {
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         if (dist <= totalR + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
-          const { damage: dmg, isCrit } = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-          e.takeDamage(dmg);
-          particles.createHitSparks(e.x, e.y, isCrit ? 8 : 4);
-          particles.createDamageNumber(e.x, e.y, dmg, isCrit);
+          const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
+          const hit = e.takeDamage(rolled.damage, {
+            isTrueDamage: rolled.isTrueDamage,
+            armorPenFlat: rolled.armorPenFlat,
+            armorPenPercent: rolled.armorPenPercent,
+            attackerAccuracy: rolled.accuracy,
+            isCrit: rolled.isCrit
+          }, particles);
+
+          if (hit > 0) {
+            particles.createHitSparks(e.x, e.y, rolled.isCrit ? 8 : 4);
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+          }
 
           if (this.doubleStrike && !e.isDead) {
-            const rolled2 = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-            e.takeDamage(rolled2.damage);
-            particles.createDamageNumber(e.x, e.y - 12, rolled2.damage, rolled2.isCrit);
+            const rolled2 = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
+            const hit2 = e.takeDamage(rolled2.damage, {
+              isTrueDamage: rolled2.isTrueDamage,
+              armorPenFlat: rolled2.armorPenFlat,
+              armorPenPercent: rolled2.armorPenPercent,
+              attackerAccuracy: rolled2.accuracy,
+              isCrit: rolled2.isCrit
+            }, particles);
+            if (hit2 > 0) {
+              particles.createDamageNumber(e.x, e.y - 12, hit2, rolled2.isCrit, rolled2.isTrueDamage);
+            }
           }
 
           if (e.isDead && onEnemyKill) {
@@ -523,7 +562,7 @@ export class PoolZoneWeapon {
     this.timer = 1.0;
     this.poolCount = 1;
     this.radius = 70;
-    this.damage = 16;
+    this.damage = 120;
     this.duration = 4.0;
     this.hasDot = false; // Cấp 7
     this.activePools = [];
@@ -589,14 +628,27 @@ export class PoolZoneWeapon {
           if (e.isDead) continue;
           const d = Math.hypot(e.x - pool.x, e.y - pool.y);
           if (d <= pool.radius + e.getHitboxRadius()) {
-            const { damage: poolDmg, isCrit } = player.rollDamage ? player.rollDamage(pool.damage) : { damage: pool.damage, isCrit: false };
-            e.takeDamage(poolDmg);
-            particles.createHitSparks(e.x, e.y, isCrit ? 8 : 4);
-            particles.createDamageNumber(e.x, e.y, poolDmg, isCrit);
+            const rawPoolDmg = pool.damage;
+            const rolled = player.rollDamage ? player.rollDamage(rawPoolDmg) : { damage: rawPoolDmg, isCrit: false, isTrueDamage: false };
+            const hit = e.takeDamage(rolled.damage, {
+              isTrueDamage: rolled.isTrueDamage,
+              armorPenFlat: rolled.armorPenFlat,
+              armorPenPercent: rolled.armorPenPercent,
+              attackerAccuracy: rolled.accuracy,
+              isCrit: rolled.isCrit
+            }, particles);
+
+            if (hit > 0) {
+              particles.createHitSparks(e.x, e.y, rolled.isCrit ? 8 : 4);
+              particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+            }
 
             if (this.hasDot) {
-              e.zoneDotTimer = 5.0;
-              e.zoneDotDmg = pool.damage * 0.20;
+              const canBurn = e.canApplyEffect ? e.canApplyEffect(1.0, player.accuracy) : true;
+              if (canBurn) {
+                e.zoneDotTimer = 5.0;
+                e.zoneDotDmg = rawPoolDmg * 0.20;
+              }
             }
 
             if (e.isDead && onEnemyKill) {
@@ -659,12 +711,13 @@ export class PiercingNeedleWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    this.damage = 18;
+    this.damage = 240;
     this.cooldown = 1.1;
     this.timer = 0.4;
     this.count = 1;
     this.sizeScale = 1.0;
     this.knockback = 0;
+    this.armorPenFlat = 50; // Xuyên Giáp cố định 50 điểm!
   }
 
   upgrade() {
@@ -702,6 +755,7 @@ export class PiercingNeedleWeapon {
         proj.customSprite = getWeaponSprite('assets/weapons/sword_plain_single.png');
         proj.width = 46 * this.sizeScale;
         proj.height = 18 * this.sizeScale;
+        proj.armorPenFlat = this.armorPenFlat || 50; // Xuyên giáp phẳng
         spawnProjCb(proj);
       }
     }
@@ -723,7 +777,7 @@ export class BoomerangWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    this.damage = 26;
+    this.damage = 260;
     this.cooldown = 1.6;
     this.timer = 0.6;
     this.count = 1;
@@ -810,10 +864,19 @@ export class BoomerangWeapon {
         const dist = Math.hypot(b.x - e.x, b.y - e.y);
         if (dist <= this.size + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
-          const { damage: dmg, isCrit } = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-          e.takeDamage(dmg);
-          particles.createHitSparks(b.x, b.y, isCrit ? 8 : 4);
-          particles.createDamageNumber(e.x, e.y, dmg, isCrit);
+          const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
+          const hit = e.takeDamage(rolled.damage, {
+            isTrueDamage: rolled.isTrueDamage,
+            armorPenFlat: rolled.armorPenFlat,
+            armorPenPercent: rolled.armorPenPercent,
+            attackerAccuracy: rolled.accuracy,
+            isCrit: rolled.isCrit
+          }, particles);
+
+          if (hit > 0) {
+            particles.createHitSparks(b.x, b.y, rolled.isCrit ? 8 : 4);
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+          }
 
           if (e.isDead && onEnemyKill) {
             const burstColor = (e.config && e.config.color) || '#a040b0';
@@ -863,7 +926,7 @@ export class ArcSlashWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    this.damage = 40;
+    this.damage = 450;
     this.cooldown = 1.2;
     this.timer = 0.5;
     this.radius = 110;
@@ -918,10 +981,19 @@ export class ArcSlashWeapon {
 
             if (diff < Math.PI * 0.45) { // Góc quạt 90 độ
               const rawDmg = this.damage * dmgMult;
-              const { damage: dmg, isCrit } = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-              e.takeDamage(dmg);
-              particles.createHitSparks(e.x, e.y, isCrit ? 10 : 6);
-              particles.createDamageNumber(e.x, e.y, dmg, isCrit);
+              const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
+              const hit = e.takeDamage(rolled.damage, {
+                isTrueDamage: rolled.isTrueDamage,
+                armorPenFlat: rolled.armorPenFlat,
+                armorPenPercent: rolled.armorPenPercent,
+                attackerAccuracy: rolled.accuracy,
+                isCrit: rolled.isCrit
+              }, particles);
+
+              if (hit > 0) {
+                particles.createHitSparks(e.x, e.y, rolled.isCrit ? 10 : 6);
+                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+              }
 
               if (this.knockback > 0) {
                 e.x += (this.slashFacing === 'right' ? 1 : -1) * this.knockback;
@@ -999,7 +1071,7 @@ export class EvolvedStormSwordWeapon {
     this.maxLevel = 7;
     this.type = 'attack';
 
-    this.damage = 120;
+    this.damage = 1200;
     this.cooldown = 0.45;
     this.timer = 0.1;
     this.bladeCount = 4;
@@ -1030,10 +1102,17 @@ export class EvolvedStormSwordWeapon {
         const d = Math.hypot(bx - e.x, by - e.y);
         if (d <= 35 + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
-          const { damage: dmg, isCrit } = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false };
-          e.takeDamage(dmg);
-          particles.createHitSparks(bx, by, isCrit ? 14 : 8);
-          particles.createDamageNumber(e.x, e.y, dmg, isCrit);
+          const rolled = player.rollDamage ? player.rollDamage(rawDmg, true) : { damage: rawDmg, isCrit: false, isTrueDamage: true };
+          const hit = e.takeDamage(rolled.damage, {
+            isTrueDamage: true, // Sát Thương Chuẩn tối thượng bỏ qua 100% giáp!
+            attackerAccuracy: rolled.accuracy,
+            isCrit: rolled.isCrit
+          }, particles);
+
+          if (hit > 0) {
+            particles.createHitSparks(bx, by, rolled.isCrit ? 14 : 8);
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, true); // True Damage
+          }
           this.hitCooldowns.set(e, 0.25);
           if (e.isDead && onEnemyKill) onEnemyKill(e);
         }

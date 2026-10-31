@@ -32,8 +32,8 @@ export class EnemyProjectile {
     this.rotation = Math.atan2(dy, dx);
   }
 
-  update(delta, player) {
-    if (this.isDead) return;
+  update(delta, player, particles = null) {
+    if (this.isDead) return false;
 
     this.x += this.vx * delta;
     this.y += this.vy * delta;
@@ -41,16 +41,18 @@ export class EnemyProjectile {
     this.lifespan -= delta;
     if (this.lifespan <= 0) {
       this.isDead = true;
-      return;
+      return false;
     }
 
     // Kiểm tra va chạm với Người chơi
     const dist = Math.hypot(this.x - player.x, this.y - player.y);
     if (dist < this.radius + player.getHitboxRadius()) {
-      if (player.takeDamage(this.damage)) {
+      if (player.takeDamage(this.damage, { attackerAccuracy: 1.0 }, particles)) {
         this.isDead = true;
+        return { hit: true, damage: this.damage };
       }
     }
+    return false;
   }
 
   render(ctx, camera) {

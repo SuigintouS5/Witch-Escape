@@ -49,16 +49,16 @@ export const SKILL_TREE_DEFINITIONS = {
     format: (lvl) => `-${(lvl * 2)}% Thời gian hồi chiêu`
   },
 
-  // --- NHÁNH 2: SINH TỒN (SURVIVAL) ---
+  // --- NHÁNH 2: SINH TỒN (SURVIVAL - Scale x10) ---
   max_health: {
     id: 'max_health',
     category: 'survival',
     name: 'Sinh Mệnh Bất Diệt',
     icon: '❤️',
     maxLevel: 10,
-    desc: 'Tăng +15 Máu tối đa mỗi cấp.',
-    valuePerLevel: 15,
-    format: (lvl) => `+${lvl * 15} Máu tối đa`
+    desc: 'Tăng +150 Máu tối đa mỗi cấp.',
+    valuePerLevel: 150,
+    format: (lvl) => `+${lvl * 150} Máu tối đa`
   },
   regen: {
     id: 'regen',
@@ -66,9 +66,9 @@ export const SKILL_TREE_DEFINITIONS = {
     name: 'Huyết Mạch Tái Sinh',
     icon: '🌿',
     maxLevel: 10,
-    desc: 'Tự động hồi phục +0.8 Máu mỗi giây mỗi cấp.',
-    valuePerLevel: 0.8,
-    format: (lvl) => `+${(lvl * 0.8).toFixed(1)} Máu/giây`
+    desc: 'Tự động hồi phục +8 Máu mỗi giây mỗi cấp.',
+    valuePerLevel: 8.0,
+    format: (lvl) => `+${(lvl * 8.0).toFixed(0)} Máu/giây`
   },
   armor: {
     id: 'armor',
@@ -76,9 +76,9 @@ export const SKILL_TREE_DEFINITIONS = {
     name: 'Giáp Ma Cổ Đại',
     icon: '🛡️',
     maxLevel: 10,
-    desc: 'Giảm 2% sát thương nhận vào từ kẻ địch mỗi cấp.',
-    valuePerLevel: 0.02,
-    format: (lvl) => `Giảm ${(lvl * 2)}% sát thương nhận`
+    desc: 'Tăng +10 Điểm Giáp phòng ngự mỗi cấp.',
+    valuePerLevel: 10,
+    format: (lvl) => `+${lvl * 10} Điểm Giáp`
   },
   lifesteal: {
     id: 'lifesteal',
@@ -143,8 +143,8 @@ export const CHARACTER_SPECIAL_MASTERY = {
   },
   dark_knight: {
     name: 'Khí Phách Hắc Ám',
-    desc: 'Phản đòn thêm +25 sát thương và tăng +1.5 Giáp cứng mỗi cấp; khi đứng yên tăng thêm +20% sát thương đòn đánh.',
-    format: (lvl) => `Phản đòn +${lvl * 25} dmg, Giáp cứng +${(lvl * 1.5).toFixed(1)}, +20% dmg khi đứng yên.`
+    desc: 'Phản đòn thêm +250 cố định và +2% phản sát thương, tăng +15 Giáp cứng mỗi cấp; khi đứng yên tăng thêm +20% sát thương đòn đánh.',
+    format: (lvl) => `Phản đòn +${lvl * 250} (+${lvl * 2}%), Giáp cứng +${lvl * 15}, +20% dmg khi đứng yên.`
   },
   high_mage: {
     name: 'Bão Tố Nguyên Thủy',
@@ -264,17 +264,63 @@ export class MasterySystem {
     return true;
   }
 
-  // Tẩy Điểm Kỹ Năng (Reset toàn bộ điểm kỹ năng để cộng lại)
+  // Hoàn lại 1 Điểm Kỹ Năng từ một nhánh cụ thể (giảm 1 cấp)
+  refundSkill(charId, skillKey) {
+    const char = this.getCharData(charId);
+    const cur = char.skills[skillKey] || 0;
+    if (cur <= 0) return false;
+
+    char.skills[skillKey] = cur - 1;
+    char.skillPoints++;
+    this.save();
+    return true;
+  }
+
+  // Tẩy Điểm Kỹ Năng (Reset toàn bộ điểm kỹ năng của 12 nhánh để hoàn lại điểm)
   resetSkills(charId) {
     const char = this.getCharData(charId);
     let refunded = 0;
-    for (const key of Object.keys(char.skills)) {
+    for (const key of Object.keys(SKILL_TREE_DEFINITIONS)) {
       refunded += (char.skills[key] || 0);
       char.skills[key] = 0;
     }
     char.skillPoints += refunded;
     this.save();
     return refunded;
+  }
+
+  // Tính tổng số Score đã tiêu tốn từ Cấp 1 đến cấp hiện tại
+  getTotalScoreInvested(currentLevel) {
+    let total = 0;
+    for (let lvl = 1; lvl < currentLevel; lvl++) {
+      total += this.getRequiredScore(lvl);
+    }
+    return total;
+  }
+
+  // Tẩy Cấp Thông Thạo (Reset Mastery Level về Cấp 1 & Hoàn lại 100% Score)
+  resetMasteryLevel(charId) {
+    const char = this.getCharData(charId);
+    if (char.level <= 1) return 0;
+
+    const refundedScore = this.getTotalScoreInvested(char.level);
+    char.score += refundedScore;
+    char.level = 1;
+    char.skillPoints = 0;
+    for (const key of Object.keys(SKILL_TREE_DEFINITIONS)) {
+      char.skills[key] = 0;
+    }
+    this.save();
+    return refundedScore;
+  }
+
+  // Cộng thêm Score thử nghiệm để test tính năng
+  addTestScore(charId, amount = 10000) {
+    const char = this.getCharData(charId);
+    char.score += amount;
+    char.totalScoreEarned = (char.totalScoreEarned || 0) + amount;
+    this.save();
+    return amount;
   }
 
   // Lấy toàn bộ chỉ số bổ trợ từ Cây Kỹ Năng của nhân vật để áp dụng vào trận
@@ -289,9 +335,10 @@ export class MasterySystem {
       bonusCritDamage: (s.crit_dmg || 0) * 0.10,             // +10% / cấp
       cooldownReduction: (s.cooldown || 0) * 0.02,           // -2% hồi chiêu / cấp
 
-      bonusHealth: (s.max_health || 0) * 15,                 // +15 HP / cấp
-      bonusRegen: (s.regen || 0) * 0.8,                      // +0.8 HP/s / cấp
-      damageReduction: (s.armor || 0) * 0.02,                // Giảm 2% dmg / cấp
+      bonusHealth: (s.max_health || 0) * 150,                // +150 HP / cấp
+      bonusRegen: (s.regen || 0) * 8.0,                      // +8 HP/s / cấp
+      bonusArmor: ((s.armor || 0) * 10) + (charId === 'dark_knight' ? (s.special || 0) * 15 : 0), // Giáp cứng
+      damageReduction: 0,                                     // Độc lập với Giáp
       lifesteal: (s.lifesteal || 0) * 0.006,                 // +0.6% Lifesteal / cấp
 
       bonusSpeedMult: 1.0 + (s.speed || 0) * 0.025,          // +2.5% Tốc độ / cấp

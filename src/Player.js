@@ -17,6 +17,8 @@ export class Player {
     const bonusHp = (metaBonuses ? metaBonuses.bonusHealth : 0) + (this.masteryBonuses.bonusHealth || 0);
     const speedMult = (metaBonuses ? metaBonuses.bonusSpeedMult : 1.0) * (this.masteryBonuses.bonusSpeedMult || 1.0);
     const bonusCrit = (metaBonuses ? metaBonuses.bonusCritChance : 0) + (this.masteryBonuses.bonusCritChance || 0);
+    const metaDmg = (metaBonuses && metaBonuses.bonusDamageMult) ? metaBonuses.bonusDamageMult : 1.0;
+    const metaArmor = (metaBonuses && metaBonuses.bonusArmor) ? metaBonuses.bonusArmor : 0;
 
     let calcSpeed = (char.baseSpeed || CONFIG.PLAYER.BASE_SPEED) * speedMult;
     let calcHp = (char.maxHealth || CONFIG.PLAYER.MAX_HEALTH) + bonusHp;
@@ -40,13 +42,41 @@ export class Player {
     this.lessDamage = !!this.challenges.less_damage;
     this.moreIncomingDamage = !!this.challenges.more_incoming_damage;
 
-    // Thông số bổ trợ từ Thông Thạo (Mastery)
+    // --- HỆ THỐNG CHỈ SỐ CHIẾN ĐẤU MỞ RỘNG (COMBAT SYSTEM) ---
+    // Giáp (Điểm Phòng Ngự trừ sát thương cứng = Giáp nhân vật + Giáp Shop Cổ Viện + Giáp Cây Kỹ Năng)
+    this.armor = (char.baseArmor || 0) + metaArmor + (this.masteryBonuses.bonusArmor || 0);
+    // Hệ số Giảm Sát Thương % (độc lập với Giáp)
     this.damageReduction = this.masteryBonuses.damageReduction || 0;
+    // Chính Xác & Né Tránh
+    this.accuracy = char.accuracy || CONFIG.PLAYER.BASE_ACCURACY || 1.0;
+    this.dodge = char.dodgeRate || CONFIG.PLAYER.BASE_DODGE || 0.05;
+    // Xuyên Giáp
+    this.armorPenFlat = 0;
+    this.armorPenPercent = 0;
+    // Máu Ảo (Thanh Trắng đè lên thanh Máu đỏ)
+    this.shield = 0;
+    this.maxShield = this.maxHealth;
+
+    // Thông số bổ trợ từ Thông Thạo (Mastery) & Nâng Cấp Vĩnh Viễn (Meta)
     this.lifesteal = this.masteryBonuses.lifesteal || 0;
     this.masteryRegen = this.masteryBonuses.bonusRegen || 0;
+    this.metaDmgMult = metaDmg;
     this.masteryDmgMult = 1.0 + (this.masteryBonuses.bonusDamageMult || 0);
+    this.totalDmgMult = this.metaDmgMult * this.masteryDmgMult;
     this.pickupRangeBonus = this.masteryBonuses.bonusPickupRange || 0;
     this.specialMasteryLevel = this.masteryBonuses.specialMasteryLevel || 0;
+
+    // --- HỆ THỐNG CHỈ SỐ PHẢN SÁT THƯƠNG (REFLECT DAMAGE / THORNS SYSTEM) ---
+    // 1. Phản sát thương cố định (Flat Thorns)
+    this.baseReflectFlat = (char.baseReflectFlat || 0);
+    this.masteryReflectFlat = (char.id === 'dark_knight' ? (this.specialMasteryLevel * 250) : 0);
+    this.thornsItemLevel = 0;
+    this.reflectFlat = this.baseReflectFlat + this.masteryReflectFlat;
+
+    // 2. Phản sát thương theo % (Percent Reflect)
+    this.baseReflectPercent = (char.baseReflectPercent || 0);
+    this.masteryReflectPercent = (char.id === 'dark_knight' ? (this.specialMasteryLevel * 0.02) : 0);
+    this.reflectPercent = this.baseReflectPercent + this.masteryReflectPercent;
 
     // Debuff slow
     this.slowTimer = 0;
@@ -142,13 +172,42 @@ export class Player {
     return this.width * 0.35;
   }
 
-  takeDamage(amount) {
+  // Thêm Máu Ảo (Shield)
+  addShield(amount, maxCap = null) {
+    const cap = maxCap || (this.maxHealth * 1.5);
+    this.maxShield = Math.max(this.maxShield, cap);
+    this.shield = Math.min(cap, this.shield + amount);
+    return this.shield;
+  }
+
+  // Nhận Sát Thương có tính Né Tránh, Giáp, Giảm Sát Thương % và Máu Ảo
+  takeDamage(amount, options = {}, particles = null) {
     if (this.isDead || this.invincibilityTimer > 0) return false;
 
-    // Giảm sát thương nhận vào từ Thông Thạo Giáp Ma Cổ Đại
+    const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
+    const isTrueDamage = !!options.isTrueDamage;
+    const armorPenFlat = options.armorPenFlat || 0;
+    const armorPenPercent = options.armorPenPercent || 0;
+
+    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1)
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    if (Math.random() > hitChance) {
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 25, 0, false, false, true); // Chữ "NÉ!"
+      }
+      return false; // Né đòn thành công
+    }
+
     let finalAmount = amount;
-    if (this.damageReduction > 0) {
-      finalAmount *= Math.max(0.15, 1.0 - this.damageReduction);
+
+    // 2. Tính Giáp & Hệ số Giảm Sát Thương % (nếu không phải Sát Thương Chuẩn)
+    if (!isTrueDamage) {
+      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      finalAmount = Math.max(1, finalAmount - effectiveArmor);
+
+      if (this.damageReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      }
     }
 
     // Chịu thêm 50% dmg nếu có thử thách
@@ -156,16 +215,53 @@ export class Player {
       finalAmount *= 1.5;
     }
 
-    this.health = Math.max(0, this.health - finalAmount);
-    this.invincibilityTimer = CONFIG.PLAYER.INVINCIBILITY_DURATION;
-    this.hitFlashTimer = 0.18; // Chớp đỏ 0.18s
+    finalAmount = Math.round(finalAmount);
 
-    if (this.health <= 0) {
-      this.health = 0;
-      this.isDead = true;
+    // 3. Trừ Máu Ảo (Thanh Trắng) trước
+    let absorbedByShield = 0;
+    if (this.shield > 0) {
+      absorbedByShield = Math.min(this.shield, finalAmount);
+      this.shield -= absorbedByShield;
+      finalAmount -= absorbedByShield;
     }
 
+    if (particles && absorbedByShield > 0) {
+      particles.createDamageNumber(this.x, this.y - 35, absorbedByShield, false, false, false, true); // Màu giáp ảo
+    }
+
+    // 4. Phần sát thương dư thừa trừ vào Máu Thật
+    if (finalAmount > 0) {
+      this.health = Math.max(0, this.health - finalAmount);
+      this.hitFlashTimer = 0.18; // Chớp đỏ
+
+      if (particles && absorbedByShield === 0) {
+        particles.createDamageNumber(this.x, this.y - 20, finalAmount, false, isTrueDamage);
+      }
+
+      if (this.health <= 0) {
+        this.health = 0;
+        this.isDead = true;
+      }
+    }
+
+    this.invincibilityTimer = CONFIG.PLAYER.INVINCIBILITY_DURATION;
     return true;
+  }
+
+  // Cập nhật lại chỉ số Phản Sát Thương khi nhặt / nâng cấp Áo Gai Ma Thần
+  updateReflectStats() {
+    const itemFlat = this.thornsItemLevel > 0 ? (this.thornsItemLevel * 200) : 0;
+    const itemPercent = this.thornsItemLevel > 0 ? (this.thornsItemLevel * 0.05) : 0;
+
+    this.reflectFlat = this.baseReflectFlat + this.masteryReflectFlat + itemFlat;
+    this.reflectPercent = this.baseReflectPercent + this.masteryReflectPercent + itemPercent;
+  }
+
+  // Tính toán sát thương phản đòn dựa trên sát thương của kẻ địch đánh vào
+  getReflectDamage(incomingDamage = 0) {
+    if (this.reflectFlat <= 0 && this.reflectPercent <= 0) return 0;
+    const fromPercent = Math.round(incomingDamage * (this.reflectPercent || 0));
+    return Math.max(1, Math.round((this.reflectFlat || 0) + fromPercent));
   }
 
   update(delta, input) {
@@ -216,9 +312,9 @@ export class Player {
     this.y = Math.max(halfH, Math.min(this.y, CONFIG.WORLD_HEIGHT - halfH));
   }
 
-  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng & bổ trợ Thông Thạo
-  rollDamage(baseDmg) {
-    let calcDmg = baseDmg * (this.masteryDmgMult || 1.0);
+  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng & bổ trợ Shop Vĩnh Viễn + Thông Thạo
+  rollDamage(baseDmg, isTrueDamage = false, extraPenFlat = 0, extraPenPercent = 0) {
+    let calcDmg = baseDmg * (this.totalDmgMult || 1.0);
 
     // Kỹ năng Tinh Hoa Thông Thạo của Hắc Kiếm Sĩ: Đứng yên tăng thêm 20% sát thương
     if (this.charConfig && this.charConfig.id === 'dark_knight' && this.specialMasteryLevel > 0 && !this.isMoving) {
@@ -235,12 +331,19 @@ export class Player {
     // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo (Hấp Huyết Ma Pháp)
     if (this.lifesteal > 0 && !this.noHeal && !this.isDead && this.health < this.maxHealth) {
       const healed = finalDamage * this.lifesteal;
-      if (healed >= 0.5) {
+      if (healed >= 1) {
         this.heal(healed);
       }
     }
 
-    return { damage: finalDamage, isCrit };
+    return {
+      damage: finalDamage,
+      isCrit,
+      isTrueDamage: !!isTrueDamage,
+      armorPenFlat: (this.armorPenFlat || 0) + extraPenFlat,
+      armorPenPercent: (this.armorPenPercent || 0) + extraPenPercent,
+      accuracy: this.accuracy || 1.0
+    };
   }
 
   render(ctx, camera) {

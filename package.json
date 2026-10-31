@@ -1,6 +1,7 @@
 {
   "name": "vampire-survival-2d",
   "version": "1.0.0",
+  "type": "module",
   "description": "Vampire Survival 2D Mini Project for Cloud Computing course",
   "main": "index.html",
   "scripts": {

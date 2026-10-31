@@ -25,6 +25,14 @@ export class Enemy {
     this.health = this.maxHealth;
     this.damage = typeConfig.damage;
 
+    // --- CHỈ SỐ PHÒNG THỦ & ĐỐI KHÁNG ---
+    this.armor = typeConfig.armor || 0;
+    this.damageReduction = 0;
+    this.accuracy = typeConfig.accuracy || 1.0;
+    this.dodge = typeConfig.dodgeRate || 0.0;
+    this.shield = 0;
+    this.maxShield = 0;
+
     this.isRanged = !!typeConfig.isRanged;
     this.isElite = !!typeConfig.isElite;
 
@@ -57,16 +65,64 @@ export class Enemy {
     return Math.min(this.width, this.height) * 0.42;
   }
 
-  takeDamage(amount) {
-    if (this.isDead) return;
+  // Kiểm tra tỉ lệ kích hoạt hiệu ứng bất lợi (có tính Chính Xác của người đánh vs Né Tránh)
+  canApplyEffect(baseProcRate, attackerAccuracy = 1.0) {
+    const rate = Math.max(0, baseProcRate * (1.0 + attackerAccuracy - this.dodge));
+    return Math.random() < rate;
+  }
 
-    this.health -= amount;
-    this.hitFlashTimer = 0.15;
+  takeDamage(amount, options = {}, particles = null) {
+    if (this.isDead) return false;
 
-    if (this.health <= 0) {
-      this.health = 0;
-      this.isDead = true;
+    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1)
+    const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    if (Math.random() > hitChance) {
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 20, 0, false, false, true); // Chữ "NÉ!"
+      }
+      return 0; // Né thành công -> 0 dmg
     }
+
+    let finalAmount = amount;
+
+    // 2. Tính Giáp & Hệ số Giảm Sát Thương (Bỏ qua nếu là Sát Thương Chuẩn)
+    if (!options.isTrueDamage) {
+      const armorPenPercent = options.armorPenPercent || 0;
+      const armorPenFlat = options.armorPenFlat || 0;
+      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      finalAmount = Math.max(1, finalAmount - effectiveArmor);
+
+      if (this.damageReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      }
+    }
+
+    finalAmount = Math.round(finalAmount);
+
+    // 3. Trừ Máu Ảo (Shield) trước nếu có
+    let absorbedByShield = 0;
+    if (this.shield > 0) {
+      absorbedByShield = Math.min(this.shield, finalAmount);
+      this.shield -= absorbedByShield;
+      finalAmount -= absorbedByShield;
+      if (particles && absorbedByShield > 0) {
+        particles.createDamageNumber(this.x, this.y - 35, absorbedByShield, false, false, false, true); // Giáp ảo
+      }
+    }
+
+    // 4. Trừ Máu Thật
+    if (finalAmount > 0) {
+      this.health -= finalAmount;
+      this.hitFlashTimer = 0.15;
+
+      if (this.health <= 0) {
+        this.health = 0;
+        this.isDead = true;
+      }
+    }
+
+    return finalAmount;
   }
 
   update(delta, player, allEnemies, onShootCallback) {

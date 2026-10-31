@@ -118,8 +118,8 @@ export class Spawner {
         const mb = new MiniBoss(this.getRandomBaseEnemyType(), pos.x, pos.y, cycle === 2 ? 1.8 : 1.0);
         this.applyEnemyChallengeBonuses(mb);
         spawnedList.push(mb);
-        // Swarm 12 quái bao vây quanh player
-        this.spawnSwarmRing(player, 12, spawnedList);
+        // Swarm 15 quái (+20%) bao vây quanh player
+        this.spawnSwarmRing(player, 15, spawnedList);
       }
 
       // 6. Phút 15:00 (900s): 2 Mini Boss + Swarm vây ráp
@@ -131,7 +131,8 @@ export class Spawner {
           this.applyEnemyChallengeBonuses(mb);
           spawnedList.push(mb);
         }
-        this.spawnSwarmRing(player, 16, spawnedList);
+        // Swarm 20 quái (+20%) bao vây quanh player
+        this.spawnSwarmRing(player, 20, spawnedList);
       }
 
       // 7. Phút 17:30 (1050s): 3 Mini Boss
@@ -193,14 +194,14 @@ export class Spawner {
       return timelineSpawns; // trả về danh sách boss vừa xuất hiện
     }
 
-    // 2. Quái thường theo chu kỳ
-    let maxEnemies = Math.round(CONFIG.ENEMIES.MAX_COUNT * (this.diff.spawnRateMult || 1.0));
+    // 2. Quái thường theo chu kỳ (Đã tăng +20% số lượng quái và giới hạn tối đa)
+    let maxEnemies = Math.round(CONFIG.ENEMIES.MAX_COUNT * (this.diff.spawnRateMult || 1.2));
     if (this.challenges.enemy_count_x4) {
-      maxEnemies = Math.min(180, maxEnemies * 2.8);
+      maxEnemies = Math.min(240, maxEnemies * 2.8);
     }
     if (this.gameMode === 'endless' && gameTime > 2400) {
       // Sau phút 40 ở Endless: Bão quái cực đông
-      maxEnemies = Math.min(220, maxEnemies * 1.5);
+      maxEnemies = Math.min(270, maxEnemies * 1.5);
     }
 
     if (enemies.length >= maxEnemies) {

@@ -72,21 +72,37 @@ export class PlayerProjectile {
         this.hitEnemies.add(enemy);
         this.hitCount++;
 
-        // 1. Tính toán sát thương & chí mạng
+        // 1. Tính toán sát thương & các chỉ số chiến đấu
         let hitDmg = this.damage;
         let isCrit = false;
+        let isTrueDmg = !!this.isTrueDamage;
+        let penFlat = this.armorPenFlat || 0;
+        let penPercent = this.armorPenPercent || 0;
+        let acc = 1.0;
+
         if (this.player && this.player.rollDamage) {
-          const rolled = this.player.rollDamage(this.damage);
+          const rolled = this.player.rollDamage(this.damage, isTrueDmg, penFlat, penPercent);
           hitDmg = rolled.damage;
           isCrit = rolled.isCrit;
+          isTrueDmg = rolled.isTrueDamage;
+          penFlat = rolled.armorPenFlat;
+          penPercent = rolled.armorPenPercent;
+          acc = rolled.accuracy;
         }
 
-        // 2. Trừ máu quái
-        enemy.takeDamage(hitDmg);
+        // 2. Trừ máu quái (có tính Né Tránh, Giáp, Giảm Sát Thương, Máu Ảo)
+        const actualDmg = enemy.takeDamage(hitDmg, {
+          isTrueDamage: isTrueDmg,
+          armorPenFlat: penFlat,
+          armorPenPercent: penPercent,
+          attackerAccuracy: acc
+        }, particles);
 
-        // 3. Hiệu ứng tia lửa pha lê & Chữ số sát thương
-        particles.createHitSparks(this.x, this.y, isCrit ? 14 : 8);
-        particles.createDamageNumber(enemy.x, enemy.y, hitDmg, isCrit);
+        // 3. Hiệu ứng tia lửa & Chữ số sát thương (Hiển thị chính xác sát thương sau khi trừ giáp)
+        if (actualDmg > 0) {
+          particles.createHitSparks(this.x, this.y, isCrit ? 14 : 8);
+          particles.createDamageNumber(enemy.x, enemy.y, actualDmg, isCrit, isTrueDmg);
+        }
 
         // 4. Đẩy lùi nhẹ quái vật về sau (Knockback)
         const knockbackDist = 28;

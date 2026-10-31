@@ -35,11 +35,19 @@ export class MiniBoss {
     this.isElite = true;
     this.isDead = false;
 
-    // Chỉ số Mini Boss: Máu x7 (hoặc x9.1 nếu có +30% HP), Damage x1.5
-    this.maxHealth = Math.round(baseTypeConfig.maxHealth * 7.5 * hpMult);
+    // Chỉ số Mini Boss: Máu x6.0 quái gốc, Damage x1.5, Giáp 40
+    this.maxHealth = Math.round(baseTypeConfig.maxHealth * 6.0 * hpMult);
     this.health = this.maxHealth;
     this.damage = Math.round(baseTypeConfig.damage * 1.5);
     this.speed = Math.min(100, Math.round(baseTypeConfig.speed * 0.9));
+
+    // Chỉ số Phòng thủ & Né tránh
+    this.armor = 40;
+    this.damageReduction = 0;
+    this.accuracy = 1.05;
+    this.dodge = 0.02;
+    this.shield = 0;
+    this.maxShield = 0;
 
     this.facing = 'right';
     this.walkCycle = 0;
@@ -61,14 +69,61 @@ export class MiniBoss {
     return Math.min(this.width, this.height) * 0.40;
   }
 
-  takeDamage(amount) {
-    if (this.isDead) return;
-    this.health -= amount;
-    this.hitFlashTimer = 0.15;
-    if (this.health <= 0) {
-      this.health = 0;
-      this.isDead = true;
+  canApplyEffect(baseProcRate, attackerAccuracy = 1.0) {
+    const rate = Math.max(0, baseProcRate * (1.0 + attackerAccuracy - this.dodge));
+    return Math.random() < rate;
+  }
+
+  takeDamage(amount, options = {}, particles = null) {
+    if (this.isDead) return false;
+
+    // 1. Kiểm tra Né Tránh vs Chính Xác
+    const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    if (Math.random() > hitChance) {
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 30, 0, false, false, true); // "NÉ!"
+      }
+      return 0;
     }
+
+    let finalAmount = amount;
+
+    // 2. Tính Giáp & Hệ số Giảm Sát Thương (Bỏ qua nếu là Sát Thương Chuẩn)
+    if (!options.isTrueDamage) {
+      const armorPenPercent = options.armorPenPercent || 0;
+      const armorPenFlat = options.armorPenFlat || 0;
+      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      finalAmount = Math.max(1, finalAmount - effectiveArmor);
+
+      if (this.damageReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      }
+    }
+
+    finalAmount = Math.round(finalAmount);
+
+    // 3. Trừ Máu Ảo (Shield) trước nếu có
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, finalAmount);
+      this.shield -= absorbed;
+      finalAmount -= absorbed;
+      if (particles && absorbed > 0) {
+        particles.createDamageNumber(this.x, this.y - 45, absorbed, false, false, false, true); // Giáp ảo
+      }
+    }
+
+    // 4. Trừ Máu Thật
+    if (finalAmount > 0) {
+      this.health -= finalAmount;
+      this.hitFlashTimer = 0.15;
+      if (this.health <= 0) {
+        this.health = 0;
+        this.isDead = true;
+      }
+    }
+
+    return finalAmount;
   }
 
   update(delta, player, allEnemies, onShootCallback) {
@@ -231,11 +286,19 @@ export class MeruruBoss {
     this.width = Math.round(48 * 3.5);
     this.height = Math.round(96 * 3.5);
 
-    this.maxHealth = 16000;
+    this.maxHealth = 128000;
     this.health = this.maxHealth;
-    this.damage = 22;
+    this.damage = 220;
     this.speed = 85;
     this.config = { color: '#ec4899', name: this.name };
+
+    // --- CHỈ SỐ PHÒNG THỦ & ĐỐI KHÁNG ---
+    this.armor = 60;
+    this.damageReduction = 0.05;
+    this.accuracy = 1.10;
+    this.dodge = 0.05;
+    this.shield = 0;
+    this.maxShield = 0;
 
     this.phase = 1; // Phase 1: meruru.png | Phase 2: meruru1.png (khi máu <= 50%)
     this.spritePhase1 = getBossImage('character/meruru.png');
@@ -278,21 +341,68 @@ export class MeruruBoss {
     return this.width * 0.38;
   }
 
-  takeDamage(amount) {
-    if (this.isDead) return;
-    this.health -= amount;
-    this.hitFlashTimer = 0.14;
+  canApplyEffect(baseProcRate, attackerAccuracy = 1.0) {
+    const rate = Math.max(0, baseProcRate * (1.0 + attackerAccuracy - this.dodge));
+    return Math.random() < rate;
+  }
 
-    // Chuyển sang Phase 2 nếu máu <= 50%
-    if (this.phase === 1 && this.health <= this.maxHealth * 0.5) {
-      this.phase = 2;
-      this.speed = 95; // Tăng tốc độ khi cuồng nộ
+  takeDamage(amount, options = {}, particles = null) {
+    if (this.isDead) return false;
+
+    // 1. Kiểm tra Né Tránh vs Chính Xác
+    const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    if (Math.random() > hitChance) {
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 40, 0, false, false, true); // "NÉ!"
+      }
+      return 0;
     }
 
-    if (this.health <= 0) {
-      this.health = 0;
-      this.isDead = true;
+    let finalAmount = amount;
+
+    // 2. Tính Giáp & Hệ số Giảm Sát Thương (Bỏ qua nếu là Sát Thương Chuẩn)
+    if (!options.isTrueDamage) {
+      const armorPenPercent = options.armorPenPercent || 0;
+      const armorPenFlat = options.armorPenFlat || 0;
+      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      finalAmount = Math.max(1, finalAmount - effectiveArmor);
+
+      if (this.damageReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      }
     }
+
+    finalAmount = Math.round(finalAmount);
+
+    // 3. Trừ Máu Ảo (Shield) trước nếu có
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, finalAmount);
+      this.shield -= absorbed;
+      finalAmount -= absorbed;
+      if (particles && absorbed > 0) {
+        particles.createDamageNumber(this.x, this.y - 50, absorbed, false, false, false, true); // Giáp ảo
+      }
+    }
+
+    // 4. Trừ Máu Thật
+    if (finalAmount > 0) {
+      this.health -= finalAmount;
+      this.hitFlashTimer = 0.14;
+
+      // Chuyển sang Phase 2 nếu máu <= 50%
+      if (this.phase === 1 && this.health <= this.maxHealth * 0.5) {
+        this.phase = 2;
+        this.speed = 95; // Tăng tốc độ khi cuồng nộ
+      }
+
+      if (this.health <= 0) {
+        this.health = 0;
+        this.isDead = true;
+      }
+    }
+
+    return finalAmount;
   }
 
   update(delta, player, allEnemies, onShootCallback, particles) {
@@ -353,7 +463,7 @@ export class MeruruBoss {
     if (this.skill1ActiveTimer > 0) {
       this.skill1ActiveTimer -= delta;
       if (distToPlayer <= this.skill1Radius) {
-        player.takeDamage(16 * delta); // Sát thương theo thời gian
+        player.takeDamage(160 * delta, { attackerAccuracy: this.accuracy }, particles); // Sát thương theo thời gian
       }
     }
 
@@ -385,7 +495,7 @@ export class MeruruBoss {
           }
           const d = Math.hypot(player.x - t.x, player.y - t.y);
           if (d <= t.radius) {
-            player.takeDamage(38);
+            player.takeDamage(380, { attackerAccuracy: this.accuracy }, particles);
           }
         }
       }
@@ -564,11 +674,19 @@ export class YukiBoss {
     this.width = Math.round(48 * 3.8);
     this.height = Math.round(96 * 3.8);
 
-    this.maxHealth = 45000;
+    this.maxHealth = 385000;
     this.health = this.maxHealth;
-    this.damage = 35;
+    this.damage = 380;
     this.speed = 90;
     this.config = { color: '#ef4444', name: this.name };
+
+    // --- CHỈ SỐ PHÒNG THỦ & ĐỐI KHÁNG ---
+    this.armor = 100;
+    this.damageReduction = 0.10;
+    this.accuracy = 1.15;
+    this.dodge = 0.08;
+    this.shield = 0;
+    this.maxShield = 0;
 
     this.sprite = getBossImage('character/yuki.png');
     this.facing = 'left';
@@ -617,24 +735,71 @@ export class YukiBoss {
     return this.width * 0.38;
   }
 
-  takeDamage(amount) {
-    if (this.isDead) return;
-    this.health -= amount;
-    this.hitFlashTimer = 0.14;
+  canApplyEffect(baseProcRate, attackerAccuracy = 1.0) {
+    const rate = Math.max(0, baseProcRate * (1.0 + attackerAccuracy - this.dodge));
+    return Math.random() < rate;
+  }
 
-    const hpPercent = this.health / this.maxHealth;
-    if (hpPercent <= 0.33) {
-      this.phase = 3;
-      this.speed = 115;
-    } else if (hpPercent <= 0.66) {
-      this.phase = 2;
-      this.speed = 100;
+  takeDamage(amount, options = {}, particles = null) {
+    if (this.isDead) return false;
+
+    // 1. Kiểm tra Né Tránh vs Chính Xác
+    const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    if (Math.random() > hitChance) {
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 45, 0, false, false, true); // "NÉ!"
+      }
+      return 0;
     }
 
-    if (this.health <= 0) {
-      this.health = 0;
-      this.isDead = true;
+    let finalAmount = amount;
+
+    // 2. Tính Giáp & Hệ số Giảm Sát Thương (Bỏ qua nếu là Sát Thương Chuẩn)
+    if (!options.isTrueDamage) {
+      const armorPenPercent = options.armorPenPercent || 0;
+      const armorPenFlat = options.armorPenFlat || 0;
+      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      finalAmount = Math.max(1, finalAmount - effectiveArmor);
+
+      if (this.damageReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      }
     }
+
+    finalAmount = Math.round(finalAmount);
+
+    // 3. Trừ Máu Ảo (Shield) trước nếu có
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, finalAmount);
+      this.shield -= absorbed;
+      finalAmount -= absorbed;
+      if (particles && absorbed > 0) {
+        particles.createDamageNumber(this.x, this.y - 55, absorbed, false, false, false, true); // Giáp ảo
+      }
+    }
+
+    // 4. Trừ Máu Thật
+    if (finalAmount > 0) {
+      this.health -= finalAmount;
+      this.hitFlashTimer = 0.14;
+
+      const hpPercent = this.health / this.maxHealth;
+      if (hpPercent <= 0.33) {
+        this.phase = 3;
+        this.speed = 115;
+      } else if (hpPercent <= 0.66) {
+        this.phase = 2;
+        this.speed = 100;
+      }
+
+      if (this.health <= 0) {
+        this.health = 0;
+        this.isDead = true;
+      }
+    }
+
+    return finalAmount;
   }
 
   update(delta, player, allEnemies, onShootCallback, particles, onSpawnMinionCallback, upgradeManager) {
@@ -697,7 +862,7 @@ export class YukiBoss {
       const d = Math.hypot(player.x - this.fireRing.x, player.y - this.fireRing.y);
       // Gây sát thương nếu người chơi chạm vòng lửa
       if (d <= this.fireRing.radius + 20 && d >= this.fireRing.radius - 35) {
-        player.takeDamage(24 * delta);
+        player.takeDamage(240 * delta, { attackerAccuracy: this.accuracy }, particles);
       }
       if (this.fireRing.duration <= 0) {
         this.fireRing = null;
@@ -715,7 +880,7 @@ export class YukiBoss {
       const pullSpeed = 190;
       player.x -= (dx / Math.max(1, distToPlayer)) * pullSpeed * delta;
       player.y -= (dy / Math.max(1, distToPlayer)) * pullSpeed * delta;
-      player.takeDamage(8 * delta); // Sát thương nhỏ
+      player.takeDamage(80 * delta, { attackerAccuracy: this.accuracy }, particles); // Sát thương nhỏ
     }
 
     // SKILL 4: Slow 20% trong 2s và spam quái gần người chơi (từ Phase 2 trở đi)
@@ -772,7 +937,7 @@ export class YukiBoss {
         }
         const d = Math.hypot(player.x - this.smashTelegraph.x, player.y - this.smashTelegraph.y);
         if (d <= this.smashTelegraph.radius) {
-          player.takeDamage(99999); // ONE-HIT KILL
+          player.takeDamage(999999, { isTrueDamage: true, attackerAccuracy: 2.0 }, particles); // ONE-HIT KILL (Sát Thương Chuẩn)
         }
         this.smashTelegraph = null;
       }

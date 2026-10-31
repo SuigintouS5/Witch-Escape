@@ -13,9 +13,11 @@ export const CONFIG = {
     WIDTH: 48,
     HEIGHT: 96,
     BASE_SPEED: 230,
-    MAX_HEALTH: 100,
+    MAX_HEALTH: 1000,
     BASE_CRIT_CHANCE: 0.05, // Tỉ lệ chí mạng cơ bản 5%
     BASE_CRIT_DAMAGE: 2.0,   // Sát thương chí mạng 200% (x2 dmg)
+    BASE_ACCURACY: 1.0,     // Chỉ số chính xác cơ bản 100%
+    BASE_DODGE: 0.05,       // Tỉ lệ né tránh cơ bản 5%
     INVINCIBILITY_DURATION: 0.35, // Thời gian bất tử sau khi nhận đòn (giây)
     SPRITE_SRC: 'assets/characters/pxArt (1).png',
     FALLBACK_SRC: 'assets/characters/pxArt (4).png'
@@ -32,8 +34,11 @@ export const CONFIG = {
       witchSprite: 'character/hiro1.png',
       width: 48,
       height: 100,
-      maxHealth: 100,
+      maxHealth: 1000,
       baseSpeed: 230,
+      baseArmor: 0,
+      accuracy: 1.05,
+      dodgeRate: 0.05,
       critChance: 0.05,
       critDamage: 2.0,
       startingWeaponId: 'main_sword',
@@ -48,8 +53,13 @@ export const CONFIG = {
       spriteSheet: { cols: 8, rows: 1 },
       width: 68,
       height: 68,
-      maxHealth: 150,
+      maxHealth: 1500,
       baseSpeed: 210,
+      baseArmor: 40,
+      baseReflectFlat: 60,      // Phản sát thương cố định ban đầu
+      baseReflectPercent: 0.05, // Phản lại 5% sát thương nhận vào
+      accuracy: 1.0,
+      dodgeRate: 0.02,
       critChance: 0.03,
       critDamage: 2.0,
       startingWeaponId: 'orbiting_blades'
@@ -63,8 +73,11 @@ export const CONFIG = {
       spriteSheet: { cols: 8, rows: 1 },
       width: 64,
       height: 64,
-      maxHealth: 85,
+      maxHealth: 850,
       baseSpeed: 245,
+      baseArmor: 0,
+      accuracy: 1.10,
+      dodgeRate: 0.04,
       critChance: 0.08,
       critDamage: 2.2,
       startingWeaponId: 'holy_aura'
@@ -80,18 +93,18 @@ export const CONFIG = {
       color: '#4ade80',
       enemyHealthMult: 1.0,
       enemySpeedMult: 1.0,
-      spawnRateMult: 1.0,
+      spawnRateMult: 1.2, // Tăng +20% lượng quái xuất hiện
       scoreMult: 1.0,
       goldMult: 1.0
     },
     {
       id: 'hard',
       name: 'Ác Mộng (Nightmare)',
-      desc: 'Quái đông hơn +35%, máu trâu hơn +40%. Điểm số và vàng thưởng +50%.',
+      desc: 'Quái đông hơn +62%, máu trâu hơn +40%. Điểm số và vàng thưởng +50%.',
       color: '#f59e0b',
       enemyHealthMult: 1.4,
       enemySpeedMult: 1.15,
-      spawnRateMult: 1.35,
+      spawnRateMult: 1.62, // Tăng +20% lượng quái (1.35 * 1.2 = 1.62)
       scoreMult: 1.5,
       goldMult: 1.5
     },
@@ -102,7 +115,7 @@ export const CONFIG = {
       color: '#ef4444',
       enemyHealthMult: 2.0,
       enemySpeedMult: 1.30,
-      spawnRateMult: 1.70,
+      spawnRateMult: 2.04, // Tăng +20% lượng quái (1.70 * 1.2 = 2.04)
       scoreMult: 2.2,
       goldMult: 2.2
     }
@@ -214,7 +227,7 @@ export const CONFIG = {
 
   // Cấu hình các chủng loại Quái vật
   ENEMIES: {
-    MAX_COUNT: 75, // Giới hạn số quái tối đa trên bản đồ để giữ 60 FPS mượt mà
+    MAX_COUNT: 90, // Tăng +20% giới hạn số quái tối đa trên bản đồ (gốc 75 -> 90)
     TYPES: {
       ZOMBIE: {
         id: 'zombie',
@@ -226,8 +239,11 @@ export const CONFIG = {
         width: 104,
         height: 104,
         speed: 70,
-        maxHealth: 35,
-        damage: 10,
+        maxHealth: 350,
+        damage: 100,
+        armor: 12,
+        accuracy: 1.0,
+        dodgeRate: 0.0,
         color: '#c03030'
       },
       SKELETON: {
@@ -240,8 +256,11 @@ export const CONFIG = {
         width: 112,
         height: 112,
         speed: 110,
-        maxHealth: 22,
-        damage: 8,
+        maxHealth: 220,
+        damage: 80,
+        armor: 8,
+        accuracy: 1.0,
+        dodgeRate: 0.05,
         color: '#9040a0'
       },
       REAPER: {
@@ -252,8 +271,11 @@ export const CONFIG = {
         width: 110,
         height: 125,
         speed: 85,
-        maxHealth: 160,
-        damage: 22,
+        maxHealth: 1600,
+        damage: 220,
+        armor: 30,
+        accuracy: 1.05,
+        dodgeRate: 0.0,
         isElite: true,
         color: '#9040a0'
       },
@@ -264,8 +286,11 @@ export const CONFIG = {
         width: 54,
         height: 70,
         speed: 80,
-        maxHealth: 45,
-        damage: 12,
+        maxHealth: 450,
+        damage: 120,
+        armor: 10,
+        accuracy: 1.0,
+        dodgeRate: 0.03,
         isRanged: true,
         shootCooldown: 2.2, // Bắn cầu hắc ám mỗi 2.2 giây
         preferredDistance: 320, // Giữ cự ly 320px với người chơi
@@ -280,8 +305,11 @@ export const CONFIG = {
         width: 80,
         height: 80,
         speed: 75,
-        maxHealth: 50,
-        damage: 14,
+        maxHealth: 500,
+        damage: 140,
+        armor: 18,
+        accuracy: 1.0,
+        dodgeRate: 0.02,
         isRanged: true,
         shootCooldown: 2.0,
         preferredDistance: 280,

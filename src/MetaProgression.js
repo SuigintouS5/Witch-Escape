@@ -17,8 +17,8 @@ export class MetaProgression {
         maxLevel: 5,
         baseCost: 100,
         costMult: 1.6,
-        valuePerLevel: 20, // +20 Máu tối đa mỗi cấp
-        desc: '+20 Máu tối đa cho tất cả nhân vật.'
+        valuePerLevel: 200, // +200 Máu tối đa mỗi cấp (Scale x10)
+        desc: '+200 Máu tối đa cho tất cả nhân vật.'
       },
       damage: {
         id: 'damage',
@@ -30,6 +30,17 @@ export class MetaProgression {
         costMult: 1.8,
         valuePerLevel: 0.10, // +10% Sát thương toàn bộ vũ khí
         desc: '+10% Sát thương vũ khí cơ bản.'
+      },
+      armor: {
+        id: 'armor',
+        name: 'Giáp Ma Cổ Viện',
+        icon: '🛡️',
+        level: 0,
+        maxLevel: 5,
+        baseCost: 120,
+        costMult: 1.7,
+        valuePerLevel: 6, // +6 Điểm Giáp phòng ngự mỗi cấp
+        desc: '+6 Điểm Giáp phòng ngự giảm sát thương nhận vào.'
       },
       critChance: {
         id: 'critChance',
@@ -133,7 +144,8 @@ export class MetaProgression {
       bonusDamageMult: 1.0 + this.upgrades.damage.level * this.upgrades.damage.valuePerLevel,
       bonusCritChance: this.upgrades.critChance.level * this.upgrades.critChance.valuePerLevel,
       bonusSpeedMult: 1.0 + this.upgrades.speed.level * this.upgrades.speed.valuePerLevel,
-      goldMultiplier: 1.0 + this.upgrades.greed.level * this.upgrades.greed.valuePerLevel
+      goldMultiplier: 1.0 + this.upgrades.greed.level * this.upgrades.greed.valuePerLevel,
+      bonusArmor: (this.upgrades.armor ? this.upgrades.armor.level * this.upgrades.armor.valuePerLevel : 0)
     };
   }
 }

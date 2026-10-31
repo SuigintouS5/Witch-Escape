@@ -145,19 +145,51 @@ export class ParticleSystem {
     });
   }
 
-  // 4. Hiển thị chữ số sát thương nảy lên trên đầu quái
-  createDamageNumber(x, y, damage, isCrit = false) {
+  // 4. Hiển thị chữ số sát thương / né tránh / giáp ảo nảy lên trên đầu đối tượng
+  createDamageNumber(x, y, damage, isCrit = false, isTrueDamage = false, isDodge = false, isShieldHit = false) {
+    let text = `-${Math.round(damage)}`;
+    let color = '#ffb3c6';
+    let strokeColor = '#000000';
+    let size = 15;
+    let vy = -75;
+
+    if (isDodge) {
+      text = '⚡ NÉ!';
+      color = '#f1f5f9';
+      strokeColor = '#475569';
+      size = 18;
+      vy = -60;
+    } else if (isShieldHit) {
+      text = `🛡️ -${Math.round(damage)}`;
+      color = '#38bdf8';
+      strokeColor = '#0369a1';
+      size = 16;
+      vy = -80;
+    } else if (isTrueDamage) {
+      text = `✨ -${Math.round(damage)}`;
+      color = '#ffffff';
+      strokeColor = '#7c3aed';
+      size = 20;
+      vy = -90;
+    } else if (isCrit) {
+      text = `💥CRIT ${Math.round(damage)}`;
+      color = '#ffdd00';
+      strokeColor = '#990022';
+      size = 21;
+      vy = -95;
+    }
+
     this.floatingTexts.push({
       x: x + (Math.random() - 0.5) * 20,
       y: y - 10,
-      text: isCrit ? `💥CRIT ${Math.round(damage)}` : `-${Math.round(damage)}`,
-      vy: isCrit ? -95 : -75,
+      text: text,
+      vy: vy,
       alpha: 1.0,
       lifespan: isCrit ? 0.85 : 0.65,
       age: 0,
-      color: isCrit ? '#ffdd00' : '#ffb3c6',
-      strokeColor: isCrit ? '#990022' : '#000000',
-      size: isCrit ? 19 : 14,
+      color: color,
+      strokeColor: strokeColor,
+      size: size,
       isCrit: isCrit
     });
   }

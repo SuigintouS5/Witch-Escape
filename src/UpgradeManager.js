@@ -29,13 +29,13 @@ export class UpgradeManager {
     this.utilitySlots = [];
     this.maxUtilitySlots = 3;
 
-    // Kho định nghĩa tất cả vật phẩm phòng thủ & đa dụng
+    // Kho định nghĩa tất cả vật phẩm phòng thủ & đa dụng (Scale x10)
     this.passivePool = {
       // Phòng thủ
-      armor: { id: 'armor', name: 'Giáp Ma Thuật', icon: 'assets/icons/armor.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Giảm 5% sát thương nhận vào mỗi cấp.' },
-      shield: { id: 'shield', name: 'Khiên Hộ Thể', icon: 'assets/icons/shield.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Hấp thụ đòn đánh và tự hồi phục sau mỗi 10 giây.' },
-      regen: { id: 'regen', name: 'Trái Tim Bất Diệt', icon: 'assets/icons/heart.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Tự động hồi phục +1 Máu/giây mỗi cấp.' },
-      thorns: { id: 'thorns', name: 'Áo Gai Ma Thần', icon: 'assets/icons/thorns.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Phản lại 20 sát thương khi quái vật chạm vào người.' },
+      armor: { id: 'armor', name: 'Giáp Ma Thuật', icon: 'assets/icons/armor.png', type: 'defense', level: 0, maxLevel: 7, desc: '+20 Điểm Giáp phòng ngự mỗi cấp.' },
+      shield: { id: 'shield', name: 'Khiên Hộ Thể', icon: 'assets/icons/shield.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Tạo Máu Ảo (+250 Ảo, +100/cấp) bảo vệ thanh Máu và tự hồi sau 8s.' },
+      regen: { id: 'regen', name: 'Trái Tim Bất Diệt', icon: 'assets/icons/heart.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Tự động hồi phục +10 Máu/giây mỗi cấp.' },
+      thorns: { id: 'thorns', name: 'Áo Gai Ma Thần', icon: 'assets/icons/thorns.png', type: 'defense', level: 0, maxLevel: 7, desc: 'Phản đòn gai nhọn (+200 cố định & +5% sát thương nhận vào mỗi cấp).' },
 
       // Đa dụng (3 slot)
       magnet: { id: 'magnet', name: 'Nam Châm Hút Hồn', icon: 'assets/icons/magnet.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng 25% bán kính tự động hút Đá Kinh Nghiệm.' },
@@ -118,11 +118,24 @@ export class UpgradeManager {
     this.tempLockedSlot = null;
   }
 
-  update(delta) {
+  update(delta, player = null) {
     if (this.tempLockedSlot) {
       this.tempLockedSlot.timer -= delta;
       if (this.tempLockedSlot.timer <= 0) {
         this.clearLockedSlot();
+      }
+    }
+
+    // Tự hồi phục Máu Ảo (Khiên Hộ Thể) sau mỗi 8 giây
+    const shieldItem = this.passivePool.shield;
+    if (shieldItem && shieldItem.level > 0 && player && !player.isDead) {
+      this.shieldRegenTimer = (this.shieldRegenTimer || 0) + delta;
+      if (this.shieldRegenTimer >= 8.0) {
+        this.shieldRegenTimer = 0;
+        const maxCap = 250 + (shieldItem.level - 1) * 100;
+        if (player.shield < maxCap) {
+          player.addShield(Math.round(maxCap * 0.5), maxCap);
+        }
       }
     }
   }
@@ -314,12 +327,22 @@ export class UpgradeManager {
   }
 
   applyPassiveEffect(item, player) {
-    if (item.id === 'boots') {
+    if (item.id === 'armor') {
+      const baseArm = (player.charConfig && player.charConfig.baseArmor) || 0;
+      const masteryArm = (player.masteryBonuses && player.masteryBonuses.bonusArmor) || 0;
+      player.armor = baseArm + masteryArm + item.level * 20;
+    } else if (item.id === 'shield') {
+      const shieldAmount = 250 + (item.level - 1) * 100;
+      player.addShield(shieldAmount);
+    } else if (item.id === 'boots') {
       const baseSpd = (player.charConfig && player.charConfig.baseSpeed) || 230;
       player.speed = baseSpd * (1.0 + item.level * 0.08);
     } else if (item.id === 'clover') {
       const baseCrit = (player.charConfig && player.charConfig.critChance) || 0.05;
       player.critChance = baseCrit + item.level * 0.02;
+    } else if (item.id === 'thorns') {
+      player.thornsItemLevel = item.level;
+      if (player.updateReflectStats) player.updateReflectStats();
     }
   }
 

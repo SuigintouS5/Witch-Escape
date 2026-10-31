@@ -30,7 +30,7 @@ export class HealthDrop {
       if (this.type === 'large') {
         healAmount = player.maxHealth * 0.70;
       } else {
-        healAmount = 40;
+        healAmount = 400;
       }
       return healAmount;
     }
