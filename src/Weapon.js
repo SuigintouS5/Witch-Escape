@@ -182,7 +182,8 @@ export class MainSwordWeapon {
               }, particles);
 
               if (hit > 0) {
-                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+                particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 20 : (rolled.isCrit ? 12 : 6));
+                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
               }
 
               // Đẩy lùi 20%
@@ -327,8 +328,8 @@ export class OrbitingBladesWeapon {
           }, particles);
 
           if (hit > 0) {
-            particles.createHitSparks(bladeX, bladeY, rolled.isCrit ? 10 : 6);
-            particles.createDamageNumber(enemy.x, enemy.y, hit, rolled.isCrit, rolled.isTrueDamage);
+            particles.createHitSparks(bladeX, bladeY, rolled.critTier >= 2 ? 18 : (rolled.isCrit ? 10 : 6));
+            particles.createDamageNumber(enemy.x, enemy.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
           }
 
           this.hitCooldowns.set(enemy, 0.35); // 0.35s sau mới trúng tiếp
@@ -471,8 +472,8 @@ export class HolyAuraWeapon {
           }, particles);
 
           if (hit > 0) {
-            particles.createHitSparks(e.x, e.y, rolled.isCrit ? 8 : 4);
-            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+            particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
           }
 
           if (this.doubleStrike && !e.isDead) {
@@ -485,7 +486,8 @@ export class HolyAuraWeapon {
               isCrit: rolled2.isCrit
             }, particles);
             if (hit2 > 0) {
-              particles.createDamageNumber(e.x, e.y - 12, hit2, rolled2.isCrit, rolled2.isTrueDamage);
+              particles.createHitSparks(e.x, e.y - 12, rolled2.critTier >= 2 ? 16 : (rolled2.isCrit ? 8 : 4));
+              particles.createDamageNumber(e.x, e.y - 12, hit2, rolled2.isCrit, rolled2.isTrueDamage, false, false, null, rolled2.critTier);
             }
           }
 
@@ -639,8 +641,8 @@ export class PoolZoneWeapon {
             }, particles);
 
             if (hit > 0) {
-              particles.createHitSparks(e.x, e.y, rolled.isCrit ? 8 : 4);
-              particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+              particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
+              particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
             }
 
             if (this.hasDot) {
@@ -874,8 +876,8 @@ export class BoomerangWeapon {
           }, particles);
 
           if (hit > 0) {
-            particles.createHitSparks(b.x, b.y, rolled.isCrit ? 8 : 4);
-            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+            particles.createHitSparks(b.x, b.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
           }
 
           if (e.isDead && onEnemyKill) {
@@ -991,8 +993,8 @@ export class ArcSlashWeapon {
               }, particles);
 
               if (hit > 0) {
-                particles.createHitSparks(e.x, e.y, rolled.isCrit ? 10 : 6);
-                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage);
+                particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 20 : (rolled.isCrit ? 10 : 6));
+                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
               }
 
               if (this.knockback > 0) {
@@ -1110,8 +1112,8 @@ export class EvolvedStormSwordWeapon {
           }, particles);
 
           if (hit > 0) {
-            particles.createHitSparks(bx, by, rolled.isCrit ? 14 : 8);
-            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, true); // True Damage
+            particles.createHitSparks(bx, by, rolled.critTier >= 2 ? 24 : (rolled.isCrit ? 14 : 8));
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, true, false, false, null, rolled.critTier); // True Damage
           }
           this.hitCooldowns.set(e, 0.25);
           if (e.isDead && onEnemyKill) onEnemyKill(e);
@@ -1213,7 +1215,7 @@ export class WeaponManager {
 
   update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
     const witchRate = player && player.isWitch ? 1.20 : 1.0;
-    const cdReduction = Math.min(0.60, (player && player.cooldownReduction) ? player.cooldownReduction : 0);
+    const cdReduction = Math.min(0.75, (player && player.cooldownReduction) ? player.cooldownReduction : 0);
     const cdRate = witchRate / (1.0 - cdReduction);
     for (const weapon of this.equippedWeapons) {
       if (weapon.isLocked) continue; // Đang bị khóa bởi kỹ năng 7 của Boss

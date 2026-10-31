@@ -52,7 +52,22 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    const nextPort = Number(PORT) + 1;
+    console.warn(`Cổng ${PORT} đang bận, tự động chuyển sang cổng ${nextPort}...`);
+    server.listen(nextPort, '127.0.0.1', () => {
+      console.log(`=======================================================`);
+      console.log(`🎮 Vampire Survival 2D Game Server đang chạy tại:`);
+      console.log(`👉 http://localhost:${nextPort}`);
+      console.log(`=======================================================`);
+    });
+  } else {
+    console.error(e);
+  }
+});
+
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`=======================================================`);
   console.log(`🎮 Vampire Survival 2D Game Server đang chạy tại:`);
   console.log(`👉 http://localhost:${PORT}`);

@@ -40,7 +40,7 @@ export class UpgradeManager {
       // Đa dụng (3 slot)
       magnet: { id: 'magnet', name: 'Nam Châm Hút Hồn', icon: 'assets/icons/magnet.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng 25% bán kính tự động hút Đá Kinh Nghiệm.' },
       boots: { id: 'boots', name: 'Hài Gió Bóng Đêm', icon: 'assets/icons/boots.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng 8% tốc độ di chuyển của nhân vật mỗi cấp.' },
-      clover: { id: 'clover', name: 'Cỏ Bốn Lá May Mắn', icon: 'assets/icons/clover.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng +2% tỉ lệ chí mạng & +10% tiền vàng mỗi cấp.' },
+      clover: { id: 'clover', name: 'Cỏ Bốn Lá May Mắn', icon: 'assets/icons/clover.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng +15% tỉ lệ chí mạng & mở Siêu Crit x2, x3 khi trên 100% (+10% vàng/cấp).' },
       tome: { id: 'tome', name: 'Sách Cổ Huyền Bí', icon: 'assets/icons/tome.png', type: 'utility', level: 0, maxLevel: 7, desc: 'Tăng thêm +12% điểm kinh nghiệm (XP) nhận được mỗi cấp.' }
     };
 
@@ -338,8 +338,8 @@ export class UpgradeManager {
       const baseSpd = (player.charConfig && player.charConfig.baseSpeed) || 230;
       player.speed = baseSpd * (1.0 + item.level * 0.08);
     } else if (item.id === 'clover') {
-      const baseCrit = (player.charConfig && player.charConfig.critChance) || 0.05;
-      player.critChance = baseCrit + item.level * 0.02;
+      const baseCrit = (player.baseCritChance !== undefined) ? player.baseCritChance : (((player.charConfig && player.charConfig.critChance) || 0.05));
+      player.critChance = baseCrit + item.level * 0.15;
     } else if (item.id === 'thorns') {
       player.thornsItemLevel = item.level;
       if (player.updateReflectStats) player.updateReflectStats();

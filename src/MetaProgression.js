@@ -74,6 +74,39 @@ export class MetaProgression {
         costMult: 1.7,
         valuePerLevel: 0.20, // +20% Vàng nhận được
         desc: '+20% Tiền Vàng thu được sau mỗi trận.'
+      },
+      bookSlots: {
+        id: 'bookSlots',
+        name: 'Kệ Sách Cổ Điển',
+        icon: '📚',
+        level: 0,
+        maxLevel: 2,
+        baseCost: 350,
+        costMult: 2.5,
+        valuePerLevel: 1, // +1 Ô chứa sách
+        desc: '+1 Ô chứa Sách trong trận (Khởi đầu 3 ô, tối đa 5 ô).'
+      },
+      starterBooks: {
+        id: 'starterBooks',
+        name: 'Khai Sáng Ban Đầu',
+        icon: '📜',
+        level: 0,
+        maxLevel: 1,
+        baseCost: 500,
+        costMult: 2.0,
+        valuePerLevel: 1, // Chọn thêm 1 sách khởi đầu
+        desc: 'Cho phép mang thêm 1 Sách Khởi Đầu trước trận đấu (Tổng cộng 2 cuốn).'
+      },
+      bookDropRate: {
+        id: 'bookDropRate',
+        name: 'Cơ Duyên Học Vấn',
+        icon: '✨',
+        level: 0,
+        maxLevel: 3,
+        baseCost: 200,
+        costMult: 1.8,
+        valuePerLevel: 0.25, // +25% Tỉ lệ rơi sách
+        desc: '+25% Tỉ lệ quái rơi Sách Khởi Đầu trong trận.'
       }
     };
 
@@ -145,7 +178,10 @@ export class MetaProgression {
       bonusCritChance: this.upgrades.critChance.level * this.upgrades.critChance.valuePerLevel,
       bonusSpeedMult: 1.0 + this.upgrades.speed.level * this.upgrades.speed.valuePerLevel,
       goldMultiplier: 1.0 + this.upgrades.greed.level * this.upgrades.greed.valuePerLevel,
-      bonusArmor: (this.upgrades.armor ? this.upgrades.armor.level * this.upgrades.armor.valuePerLevel : 0)
+      bonusArmor: (this.upgrades.armor ? this.upgrades.armor.level * this.upgrades.armor.valuePerLevel : 0),
+      maxBookSlots: 3 + (this.upgrades.bookSlots ? this.upgrades.bookSlots.level : 0),
+      maxStarterBooks: 1 + (this.upgrades.starterBooks ? this.upgrades.starterBooks.level : 0),
+      bookDropRateMult: 1.0 + (this.upgrades.bookDropRate ? this.upgrades.bookDropRate.level * this.upgrades.bookDropRate.valuePerLevel : 0)
     };
   }
 }

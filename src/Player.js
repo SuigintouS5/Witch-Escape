@@ -83,7 +83,8 @@ export class Player {
     this.slowMult = 1.0;
 
     // Chỉ số Chí Mạng (Crit System)
-    this.critChance = (char.critChance || CONFIG.PLAYER.BASE_CRIT_CHANCE) + bonusCrit;
+    this.baseCritChance = (char.critChance || CONFIG.PLAYER.BASE_CRIT_CHANCE) + bonusCrit;
+    this.critChance = this.baseCritChance;
     this.critDamage = (char.critDamage || CONFIG.PLAYER.BASE_CRIT_DAMAGE) + (this.masteryBonuses.bonusCritDamage || 0);
 
     this.invincibilityTimer = 0;
@@ -126,6 +127,28 @@ export class Player {
       this.witchSprite.onload = () => {
         this.witchSpriteLoaded = true;
       };
+    }
+
+    // Hệ Thống Sách Tri Thức (Book System)
+    this.bookStats = null;
+    this.bookSystemRef = null;
+    this.bonusGreedMult = 1.0;
+    this.metaGoldMult = (metaBonuses && metaBonuses.goldMultiplier) ? metaBonuses.goldMultiplier : 1.0;
+    this.cooldownReduction = 0;
+  }
+
+  // Kết nối Hệ Thống Sách Tri Thức
+  setBookSystem(bookSystem) {
+    this.bookSystemRef = bookSystem;
+    this.updateBookStats();
+  }
+
+  updateBookStats() {
+    if (this.bookSystemRef) {
+      this.bookStats = this.bookSystemRef.getBonusStats(this);
+      if (this.bookStats) {
+        this.cooldownReduction = this.bookStats.cooldownReduction || 0;
+      }
     }
   }
 
@@ -188,9 +211,12 @@ export class Player {
     const isTrueDamage = !!options.isTrueDamage;
     const armorPenFlat = options.armorPenFlat || 0;
     const armorPenPercent = options.armorPenPercent || 0;
+    const attackerEnemy = options.attacker || null;
 
-    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1)
-    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - this.dodge));
+    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1 - có cộng Né từ Sách)
+    const bookDodge = this.bookStats ? (this.bookStats.dodge || 0) : 0;
+    const effectiveDodge = Math.min(0.80, this.dodge + bookDodge);
+    const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - effectiveDodge));
     if (Math.random() > hitChance) {
       if (particles) {
         particles.createDamageNumber(this.x, this.y - 25, 0, false, false, true); // Chữ "NÉ!"
@@ -202,11 +228,13 @@ export class Player {
 
     // 2. Tính Giáp & Hệ số Giảm Sát Thương % (nếu không phải Sát Thương Chuẩn)
     if (!isTrueDamage) {
-      const effectiveArmor = Math.max(0, this.armor * (1.0 - armorPenPercent) - armorPenFlat);
+      const armorMult = this.bookStats ? (this.bookStats.armorMult || 1.0) : 1.0;
+      const effectiveArmor = Math.max(0, (this.armor * armorMult) * (1.0 - armorPenPercent) - armorPenFlat);
       finalAmount = Math.max(1, finalAmount - effectiveArmor);
 
-      if (this.damageReduction > 0) {
-        finalAmount *= Math.max(0.10, 1.0 - this.damageReduction);
+      const totalDmgReduction = Math.min(0.75, this.damageReduction + (this.bookStats ? (this.bookStats.damageReduction || 0) : 0));
+      if (totalDmgReduction > 0) {
+        finalAmount *= Math.max(0.10, 1.0 - totalDmgReduction);
       }
     }
 
@@ -238,9 +266,30 @@ export class Player {
         particles.createDamageNumber(this.x, this.y - 20, finalAmount, false, isTrueDamage);
       }
 
+      // Ghi nhận sát thương vào Sách Tri Thức (Kafka trừ stack, Shakespeare reset timer, Dumas theo dõi quái)
+      if (this.bookSystemRef) {
+        this.bookSystemRef.onPlayerTakeDamage(attackerEnemy, finalAmount, true);
+      }
+
       if (this.health <= 0) {
-        this.health = 0;
-        this.isDead = true;
+        // Kiểm tra Hồi Sinh từ Đại Tác Phẩm Hợp Thể (Lacan / Derrida / Marx)
+        if (this.bookSystemRef && this.bookSystemRef.hasExtraLife()) {
+          const revivePercent = this.bookSystemRef.consumeExtraLife();
+          this.health = Math.max(1, Math.round(this.maxHealth * revivePercent));
+          this.invincibilityTimer = 2.5; // Bất tử 2.5s khi hồi sinh
+          if (particles) {
+            particles.createDamageNumber(this.x, this.y - 45, 0, false, false, false, false, '#ffd700');
+            particles.createHitSparks(this.x, this.y, 25);
+          }
+        } else {
+          this.health = 0;
+          this.isDead = true;
+        }
+      }
+    } else if (absorbedByShield > 0) {
+      // Khi chỉ bị đánh vào Máu Ảo, không tính là mất máu thật (Shakespeare không bị reset)
+      if (this.bookSystemRef) {
+        this.bookSystemRef.onPlayerTakeDamage(attackerEnemy, absorbedByShield, false);
       }
     }
 
@@ -259,13 +308,18 @@ export class Player {
 
   // Tính toán sát thương phản đòn dựa trên sát thương của kẻ địch đánh vào
   getReflectDamage(incomingDamage = 0) {
-    if (this.reflectFlat <= 0 && this.reflectPercent <= 0) return 0;
-    const fromPercent = Math.round(incomingDamage * (this.reflectPercent || 0));
+    const bookReflect = this.bookStats ? (this.bookStats.reflectPercent || 0) : 0;
+    const totalReflectPercent = (this.reflectPercent || 0) + bookReflect;
+    if (this.reflectFlat <= 0 && totalReflectPercent <= 0) return 0;
+    const fromPercent = Math.round(incomingDamage * totalReflectPercent);
     return Math.max(1, Math.round((this.reflectFlat || 0) + fromPercent));
   }
 
   update(delta, input) {
     if (this.isDead) return;
+
+    // Cập nhật chỉ số từ Hệ Thống Sách Tri Thức liên tục
+    this.updateBookStats();
 
     // Hồi máu liên tục từ Thông Thạo Huyết Mạch Tái Sinh
     if (this.masteryRegen > 0 && !this.noHeal && this.health < this.maxHealth) {
@@ -291,7 +345,8 @@ export class Player {
     const move = input.getMovementVector();
     this.isMoving = (move.x !== 0 || move.y !== 0);
 
-    const effSpeed = this.speed * this.slowMult;
+    const bookSpeedMult = this.bookStats ? (this.bookStats.speedMult || 1.0) : 1.0;
+    const effSpeed = this.speed * this.slowMult * bookSpeedMult;
 
     if (this.isMoving) {
       this.x += move.x * effSpeed * delta;
@@ -312,9 +367,10 @@ export class Player {
     this.y = Math.max(halfH, Math.min(this.y, CONFIG.WORLD_HEIGHT - halfH));
   }
 
-  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng & bổ trợ Shop Vĩnh Viễn + Thông Thạo
+  // Hàm tính toán sát thương có kèm tỉ lệ chí mạng đa tầng & bổ trợ Shop Vĩnh Viễn + Thông Thạo + Sách Tri Thức
   rollDamage(baseDmg, isTrueDamage = false, extraPenFlat = 0, extraPenPercent = 0) {
-    let calcDmg = baseDmg * (this.totalDmgMult || 1.0);
+    const bookDmgMult = this.bookStats ? (this.bookStats.dmgMult || 1.0) : 1.0;
+    let calcDmg = baseDmg * (this.totalDmgMult || 1.0) * bookDmgMult;
 
     // Kỹ năng Tinh Hoa Thông Thạo của Hắc Kiếm Sĩ: Đứng yên tăng thêm 20% sát thương
     if (this.charConfig && this.charConfig.id === 'dark_knight' && this.specialMasteryLevel > 0 && !this.isMoving) {
@@ -325,12 +381,35 @@ export class Player {
       calcDmg *= 0.5; // Giảm 50% dmg nếu có thử thách
     }
 
-    const isCrit = Math.random() < this.critChance;
-    const finalDamage = isCrit ? Math.round(calcDmg * this.critDamage) : Math.round(calcDmg);
+    // --- CƠ CHẾ CHÍ MẠNG ĐA TẦNG VƯỢT 100% (MULTI-TIER CRIT / SIÊU CHÍ MẠNG) ---
+    const totalCritChance = this.critChance + (this.bookStats ? (this.bookStats.critChance || 0) : 0);
+    const totalCritDamage = this.critDamage + (this.bookStats ? (this.bookStats.critDamage || 0) : 0);
 
-    // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo (Hấp Huyết Ma Pháp)
-    if (this.lifesteal > 0 && !this.noHeal && !this.isDead && this.health < this.maxHealth) {
-      const healed = finalDamage * this.lifesteal;
+    let critTier = 0;
+    if (totalCritChance > 0) {
+      const guaranteedTiers = Math.floor(totalCritChance);
+      const extraChance = totalCritChance - guaranteedTiers;
+      critTier = guaranteedTiers + (Math.random() < extraChance ? 1 : 0);
+    }
+
+    let finalDamage = calcDmg;
+    if (critTier > 0) {
+      // Mỗi tầng Crit nhân dồn theo hệ số sát thương chí mạng
+      finalDamage = Math.round(calcDmg * Math.pow(totalCritDamage, critTier));
+    } else {
+      finalDamage = Math.round(calcDmg);
+    }
+
+    // Tỉ lệ Sát Thương Chuẩn từ Sách (Derrida, Camus, v.v.)
+    let finalIsTrueDamage = !!isTrueDamage;
+    if (this.bookStats && this.bookStats.trueDmgRatio > 0 && Math.random() < this.bookStats.trueDmgRatio) {
+      finalIsTrueDamage = true;
+    }
+
+    // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo + Sách
+    const totalLifesteal = this.lifesteal + (this.bookStats ? (this.bookStats.lifesteal || 0) : 0);
+    if (totalLifesteal > 0 && !this.noHeal && !this.isDead && this.health < this.maxHealth) {
+      const healed = finalDamage * totalLifesteal;
       if (healed >= 1) {
         this.heal(healed);
       }
@@ -338,11 +417,12 @@ export class Player {
 
     return {
       damage: finalDamage,
-      isCrit,
-      isTrueDamage: !!isTrueDamage,
+      isCrit: critTier > 0,
+      critTier: critTier,
+      isTrueDamage: finalIsTrueDamage,
       armorPenFlat: (this.armorPenFlat || 0) + extraPenFlat,
-      armorPenPercent: (this.armorPenPercent || 0) + extraPenPercent,
-      accuracy: this.accuracy || 1.0
+      armorPenPercent: (this.armorPenPercent || 0) + extraPenPercent + (this.bookStats ? (this.bookStats.armorPenPercent || 0) : 0),
+      accuracy: (this.accuracy || 1.0) + (this.bookStats ? (this.bookStats.accuracy || 0) : 0)
     };
   }
 

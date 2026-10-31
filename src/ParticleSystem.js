@@ -146,37 +146,84 @@ export class ParticleSystem {
   }
 
   // 4. Hiển thị chữ số sát thương / né tránh / giáp ảo nảy lên trên đầu đối tượng
-  createDamageNumber(x, y, damage, isCrit = false, isTrueDamage = false, isDodge = false, isShieldHit = false) {
+  createDamageNumber(x, y, damage, isCrit = false, isTrueDamage = false, isDodge = false, isShieldHit = false, customColor = null, critTier = null) {
+    const tier = (critTier !== null) ? critTier : (typeof isCrit === 'number' ? isCrit : (isCrit ? 1 : 0));
+    const isCritActive = tier > 0;
+
     let text = `-${Math.round(damage)}`;
-    let color = '#ffb3c6';
+    let color = customColor || '#ffb3c6';
     let strokeColor = '#000000';
     let size = 15;
     let vy = -75;
+    let lifespan = 0.65;
 
     if (isDodge) {
       text = '⚡ NÉ!';
-      color = '#f1f5f9';
+      color = customColor || '#f1f5f9';
       strokeColor = '#475569';
       size = 18;
       vy = -60;
     } else if (isShieldHit) {
       text = `🛡️ -${Math.round(damage)}`;
-      color = '#38bdf8';
+      color = customColor || '#38bdf8';
       strokeColor = '#0369a1';
       size = 16;
       vy = -80;
     } else if (isTrueDamage) {
-      text = `✨ -${Math.round(damage)}`;
-      color = '#ffffff';
-      strokeColor = '#7c3aed';
-      size = 20;
-      vy = -90;
-    } else if (isCrit) {
-      text = `💥CRIT ${Math.round(damage)}`;
-      color = '#ffdd00';
-      strokeColor = '#990022';
-      size = 21;
-      vy = -95;
+      if (tier >= 3) {
+        text = `⚡✨CRIT x${tier} ${Math.round(damage)}`;
+        color = customColor || '#fde047';
+        strokeColor = '#701a75';
+        size = 28;
+        vy = -120;
+        lifespan = 1.2;
+      } else if (tier === 2) {
+        text = `✨🔥CRIT x2 ${Math.round(damage)}`;
+        color = customColor || '#fb7185';
+        strokeColor = '#881337';
+        size = 25;
+        vy = -105;
+        lifespan = 1.0;
+      } else if (tier === 1) {
+        text = `✨CRIT ${Math.round(damage)}`;
+        color = customColor || '#c084fc';
+        strokeColor = '#581c87';
+        size = 22;
+        vy = -95;
+        lifespan = 0.85;
+      } else {
+        text = `✨ -${Math.round(damage)}`;
+        color = customColor || '#ffffff';
+        strokeColor = '#7c3aed';
+        size = 20;
+        vy = -90;
+      }
+    } else if (isCritActive) {
+      if (tier >= 3) {
+        // Chí mạng Cấp 3+ (Mega / Hyper Crit - Tím dạ quang thần thoại)
+        text = `⚡CRIT x${tier} ${Math.round(damage)}`;
+        color = customColor || '#f0abfc';
+        strokeColor = '#4a044e';
+        size = 30;
+        vy = -125;
+        lifespan = 1.25;
+      } else if (tier === 2) {
+        // Chí mạng Cấp 2 (Super Crit / Double Crit - Đỏ cam lửa rực rỡ)
+        text = `🔥CRIT x2 ${Math.round(damage)}`;
+        color = customColor || '#ff453a';
+        strokeColor = '#450a0a';
+        size = 26;
+        vy = -110;
+        lifespan = 1.05;
+      } else {
+        // Chí mạng Cấp 1 (Normal Crit - Vàng kim rực rỡ)
+        text = `💥CRIT ${Math.round(damage)}`;
+        color = customColor || '#ffdd00';
+        strokeColor = '#990022';
+        size = 21;
+        vy = -95;
+        lifespan = 0.85;
+      }
     }
 
     this.floatingTexts.push({
@@ -185,12 +232,13 @@ export class ParticleSystem {
       text: text,
       vy: vy,
       alpha: 1.0,
-      lifespan: isCrit ? 0.85 : 0.65,
+      lifespan: lifespan,
       age: 0,
       color: color,
       strokeColor: strokeColor,
       size: size,
-      isCrit: isCrit
+      isCrit: isCritActive,
+      critTier: tier
     });
   }
 
@@ -282,11 +330,20 @@ export class ParticleSystem {
       ctx.globalAlpha = Math.max(0, ft.alpha);
       ctx.font = `bold ${ft.size}px monospace`;
       ctx.strokeStyle = ft.strokeColor || '#000000';
-      ctx.lineWidth = ft.isCrit ? 4 : 3;
+      ctx.lineWidth = ft.critTier >= 2 ? 5 : (ft.isCrit ? 4 : 3);
+
+      if (ft.critTier >= 2) {
+        ctx.shadowColor = ft.color;
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+
       ctx.strokeText(ft.text, screen.x, screen.y);
       ctx.fillStyle = ft.color;
       ctx.fillText(ft.text, screen.x, screen.y);
     }
+    ctx.shadowBlur = 0;
 
     ctx.globalAlpha = 1;
     ctx.restore();

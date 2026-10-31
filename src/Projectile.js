@@ -80,10 +80,12 @@ export class PlayerProjectile {
         let penPercent = this.armorPenPercent || 0;
         let acc = 1.0;
 
+        let critTier = 0;
         if (this.player && this.player.rollDamage) {
           const rolled = this.player.rollDamage(this.damage, isTrueDmg, penFlat, penPercent);
           hitDmg = rolled.damage;
           isCrit = rolled.isCrit;
+          critTier = rolled.critTier || (isCrit ? 1 : 0);
           isTrueDmg = rolled.isTrueDamage;
           penFlat = rolled.armorPenFlat;
           penPercent = rolled.armorPenPercent;
@@ -100,8 +102,8 @@ export class PlayerProjectile {
 
         // 3. Hiệu ứng tia lửa & Chữ số sát thương (Hiển thị chính xác sát thương sau khi trừ giáp)
         if (actualDmg > 0) {
-          particles.createHitSparks(this.x, this.y, isCrit ? 14 : 8);
-          particles.createDamageNumber(enemy.x, enemy.y, actualDmg, isCrit, isTrueDmg);
+          particles.createHitSparks(this.x, this.y, critTier >= 2 ? 22 : (isCrit ? 14 : 8));
+          particles.createDamageNumber(enemy.x, enemy.y, actualDmg, isCrit, isTrueDmg, false, false, null, critTier);
         }
 
         // 4. Đẩy lùi nhẹ quái vật về sau (Knockback)

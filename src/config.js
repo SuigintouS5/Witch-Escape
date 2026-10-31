@@ -147,6 +147,13 @@ export const CONFIG = {
   // Tích chọn để tăng hệ số thưởng Điểm & Vàng (Chỉ nhận thưởng nếu sống sót >= 2 phút)
   CHALLENGES: [
     {
+      id: 'no_books',
+      name: '🚫 Cấm Dùng Sách',
+      desc: 'Cấm mang theo hoặc nhặt bất kỳ cuốn Sách nào trong suốt trận đấu.',
+      scoreBonus: 0.35,
+      goldBonus: 0.35
+    },
+    {
       id: 'lock_weapon',
       name: '🔒 Khóa 1 Ô Tấn Công',
       desc: 'Chỉ được trang bị tối đa 4 vũ khí tấn công.',

@@ -21,6 +21,8 @@ import {
   SKILL_TREE_DEFINITIONS,
   CHARACTER_SPECIAL_MASTERY
 } from './MasterySystem.js';
+import { BookSystem, BOOK_DEFINITIONS, STARTER_BOOK_IDS } from './BookSystem.js';
+import { BookDrop } from './BookDrop.js';
 
 // Cache các icon pixel art từ bộ asset mới để vẽ tức thì
 const ICON_CACHE = {};
@@ -114,6 +116,16 @@ class Game {
     // Bắt đầu từ Menu Chính
     // this.initGame();
 
+    // Hệ Thống Sách Tri Thức (Book System)
+    this.bookSystem = new BookSystem();
+    this.bookDrops = [];
+    this.selectedStarterBookIds = [];
+    this.codexFilter = 'all';
+    this.codexScrollY = 0;
+    this.activeEvolutionModal = null;
+    this.selectedCodexBook = null;
+    this.gameToast = null;
+
     // Thông báo trạng thái trên màn hình Cây Kỹ Năng & Cổ Viện Shop (Toast notification)
     this.skillTreeToast = null;
     this.shopToast = null;
@@ -122,6 +134,7 @@ class Game {
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
+    this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
     // Vòng lặp chính
     this.lastTime = performance.now();
@@ -132,7 +145,7 @@ class Game {
     requestAnimationFrame((t) => this.loop(t));
   }
 
-  initGame() {
+  initGame(starterBookIds = null) {
     // Xóa file lưu trận cũ khi bắt đầu trận mới
     try {
       localStorage.removeItem('vampire_saved_run');
@@ -188,6 +201,19 @@ class Game {
       const cy = 350 + Math.random() * (CONFIG.WORLD_HEIGHT - 700);
       this.crates.push(new Crate(cx, cy));
     }
+
+    // Khởi tạo Hệ Thống Sách Tri Thức (Book System)
+    const extraSlots = (this.meta.upgrades.bookSlots ? this.meta.upgrades.bookSlots.level : 0);
+    const isNoBooksChallenge = !!(this.selectedChallenges && this.selectedChallenges.no_books);
+    const chosenBooks = isNoBooksChallenge ? [] : ((starterBookIds !== null && starterBookIds !== undefined) ? starterBookIds : (this.selectedStarterBookIds || []));
+    this.bookSystem.initRun(chosenBooks, extraSlots);
+    if (isNoBooksChallenge) {
+      this.bookSystem.maxSlots = 0;
+      this.bookSystem.activeBooks = [];
+    }
+    this.player.setBookSystem(this.bookSystem);
+    this.bookDrops = [];
+    this.activeEvolutionModal = null;
 
     this.isPaused = false;
     this.isLevelUpOpen = false;
@@ -464,6 +490,11 @@ class Game {
       return;
     }
 
+    if (e.key === 'Escape' && this.gameState === 'CODEX' && this.selectedCodexBook) {
+      this.selectedCodexBook = null;
+      return;
+    }
+
     if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
       if (this.gameState === 'PLAYING') {
         this.togglePause();
@@ -581,12 +612,44 @@ class Game {
     this.shopToast = { text, color, timer: 3.0 };
   }
 
+  showGameToast(text, color = '#22c55e') {
+    this.gameToast = { text, color, timer: 3.5 };
+  }
+
+  onWheel(e) {
+    if (this.gameState === 'CODEX') {
+      e.preventDefault();
+      this.codexScrollY = Math.max(0, Math.min(2200, this.codexScrollY + (e.deltaY > 0 ? 140 : -140)));
+    }
+  }
+
   onPointerDown(e) {
     if (e.button !== 0) return; // Chỉ nhận chuột trái
     const { mouseX, mouseY } = this.getCanvasMousePos(e);
 
-    // XỬ LÝ CLICK TRÊN CÁC MÀN HÌNH MENU (MAIN_MENU, CHAR_SELECT, DIFF_SELECT, SHOP, SKILL_TREE, GAME_OVER)
+    // XỬ LÝ CLICK TRÊN CÁC MÀN HÌNH MENU (MAIN_MENU, CHAR_SELECT, DIFF_SELECT, SHOP, SKILL_TREE, GAME_OVER, CODEX)
     if (this.gameState !== 'PLAYING') {
+      if (this.gameState === 'CODEX' && this.selectedCodexBook) {
+        // Nút đóng modal chi tiết hoặc nhấp ra ngoài modal
+        if (
+          this.codexDetailCloseBtn &&
+          mouseX >= this.codexDetailCloseBtn.x && mouseX <= this.codexDetailCloseBtn.x + this.codexDetailCloseBtn.w &&
+          mouseY >= this.codexDetailCloseBtn.y && mouseY <= this.codexDetailCloseBtn.y + this.codexDetailCloseBtn.h
+        ) {
+          this.selectedCodexBook = null;
+          return;
+        }
+        if (
+          this.codexDetailBox &&
+          (mouseX < this.codexDetailBox.x || mouseX > this.codexDetailBox.x + this.codexDetailBox.w ||
+           mouseY < this.codexDetailBox.y || mouseY > this.codexDetailBox.y + this.codexDetailBox.h)
+        ) {
+          this.selectedCodexBook = null;
+          return;
+        }
+        return; // Đang mở modal thì không kích hoạt các nút phía sau
+      }
+
       for (const btn of this.menuButtons) {
         if (
           mouseX >= btn.x && mouseX <= btn.x + btn.w &&
@@ -600,6 +663,61 @@ class Game {
     }
 
     // TRONG TRẬN ĐẤU (PLAYING)
+    // 1. Nếu đang mở Bảng Tiến Hóa Sách Tri Thức (Book Evolution Modal)
+    if (this.activeEvolutionModal) {
+      const modal = this.activeEvolutionModal;
+
+      // Xử lý riêng cho Modal Thức Tỉnh Ẩn / Hợp Thể Thần Thoại
+      if (modal.isAwakening) {
+        if (
+          this.evolutionModalContinueBtn &&
+          mouseX >= this.evolutionModalContinueBtn.x && mouseX <= this.evolutionModalContinueBtn.x + this.evolutionModalContinueBtn.w &&
+          mouseY >= this.evolutionModalContinueBtn.y && mouseY <= this.evolutionModalContinueBtn.y + this.evolutionModalContinueBtn.h
+        ) {
+          this.particles.createArcaneBlast(this.player.x, this.player.y, 4.0);
+          this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 80);
+          this.player.updateBookStats();
+          this.activeEvolutionModal = null;
+          return;
+        }
+        return;
+      }
+
+      // Nút Tạm Dừng Tiến Hóa
+      if (
+        this.evolutionModalPauseBtn &&
+        mouseX >= this.evolutionModalPauseBtn.x && mouseX <= this.evolutionModalPauseBtn.x + this.evolutionModalPauseBtn.w &&
+        mouseY >= this.evolutionModalPauseBtn.y && mouseY <= this.evolutionModalPauseBtn.y + this.evolutionModalPauseBtn.h
+      ) {
+        this.bookSystem.pauseEvolution(modal.sourceId);
+        this.showGameToast('⏸️ Đã tạm dừng tiến hóa. Bạn có thể tiến hóa bất kỳ lúc nào trong Menu Tạm Dừng!', '#60a5fa');
+        this.activeEvolutionModal = null;
+        return;
+      }
+
+      // Các nút lựa chọn Tiến Hóa
+      if (this.evolutionChoiceBtns) {
+        for (const choiceBtn of this.evolutionChoiceBtns) {
+          if (
+            mouseX >= choiceBtn.x && mouseX <= choiceBtn.x + choiceBtn.w &&
+            mouseY >= choiceBtn.y && mouseY <= choiceBtn.y + choiceBtn.h
+          ) {
+            const ok = this.bookSystem.evolveBook(modal.sourceId, choiceBtn.targetId);
+            if (ok) {
+              const def = BOOK_DEFINITIONS[choiceBtn.targetId];
+              this.particles.createArcaneBlast(this.player.x, this.player.y, 4.0);
+              this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 80);
+              this.showGameToast(`🎉 Tác Phẩm đã Thức Tỉnh: ${def ? def.work : choiceBtn.targetId}!`, '#4ade80');
+              this.player.updateBookStats();
+            }
+            this.activeEvolutionModal = null;
+            return;
+          }
+        }
+      }
+      return;
+    }
+
     if (this.isLevelUpOpen) {
       for (let i = 0; i < this.choiceCardsRects.length; i++) {
         const r = this.choiceCardsRects[i];
@@ -675,6 +793,73 @@ class Game {
       ) {
         this.exitAndFinish();
         return;
+      }
+
+      // Xử lý nút Vứt Bỏ & Tiến Hóa trong Kệ Sách Tạm Dừng
+      if (this.pauseBookButtons) {
+        for (const pbb of this.pauseBookButtons) {
+          if (
+            mouseX >= pbb.x && mouseX <= pbb.x + pbb.w &&
+            mouseY >= pbb.y && mouseY <= pbb.y + pbb.h
+          ) {
+            if (pbb.action === 'discard') {
+              const def = BOOK_DEFINITIONS[pbb.bookId];
+              this.bookSystem.discardBook(pbb.bookId);
+              this.player.updateBookStats();
+              this.showGameToast(`🗑️ Đã vứt bỏ: ${def ? def.work : pbb.bookId}. Đã giải phóng 1 ô sách!`, '#fb923c');
+              return;
+            } else if (pbb.action === 'evolve') {
+              const p = this.bookSystem.progress[pbb.bookId];
+              if (p && p.readyToEvolve) {
+                let choices = [];
+                if (p.targetId === 'choice_descartes') {
+                  choices = ['heidegger', 'kant'];
+                } else if (p.targetId === 'choice_kant') {
+                  choices = ['hegel', 'feuerbach', 'nietzsche'];
+                } else {
+                  choices = [p.targetId];
+                }
+                this.activeEvolutionModal = {
+                  sourceId: pbb.bookId,
+                  targetId: p.targetId,
+                  choices: choices
+                };
+                this.isPaused = false;
+                return;
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // Click vào ô sách trên HUD khi có biểu tượng ⚡ để tiến hóa nhanh
+    if (this.hudBookSlotRects) {
+      for (const slot of this.hudBookSlotRects) {
+        if (
+          slot.bookId && slot.readyToEvolve &&
+          mouseX >= slot.x && mouseX <= slot.x + slot.w &&
+          mouseY >= slot.y && mouseY <= slot.y + slot.h
+        ) {
+          const p = this.bookSystem.progress[slot.bookId];
+          if (p && p.readyToEvolve) {
+            let choices = [];
+            if (p.targetId === 'choice_descartes') {
+              choices = ['heidegger', 'kant'];
+            } else if (p.targetId === 'choice_kant') {
+              choices = ['hegel', 'feuerbach', 'nietzsche'];
+            } else {
+              choices = [p.targetId];
+            }
+            this.activeEvolutionModal = {
+              sourceId: slot.bookId,
+              targetId: p.targetId,
+              choices: choices
+            };
+            return;
+          }
+        }
       }
     }
   }
@@ -776,6 +961,46 @@ class Game {
       if (btnData.diffData) this.selectedDiff = btnData.diffData;
     } else if (actionId === 'start_battle_now') {
       this.initGame();
+    } else if (actionId === 'goto_book_select') {
+      this.gameState = 'BOOK_SELECT';
+    } else if (actionId.startsWith('toggle_starter_book_')) {
+      if (this.selectedChallenges && this.selectedChallenges.no_books) return;
+      const bookId = actionId.replace('toggle_starter_book_', '');
+      const maxStarters = (this.meta.upgrades.starterBooks ? (1 + this.meta.upgrades.starterBooks.level) : 1);
+      const idx = this.selectedStarterBookIds.indexOf(bookId);
+      if (idx !== -1) {
+        this.selectedStarterBookIds.splice(idx, 1);
+      } else {
+        if (this.selectedStarterBookIds.length < maxStarters) {
+          this.selectedStarterBookIds.push(bookId);
+        } else if (maxStarters === 1) {
+          this.selectedStarterBookIds = [bookId];
+        } else {
+          this.selectedStarterBookIds.shift();
+          this.selectedStarterBookIds.push(bookId);
+        }
+      }
+    } else if (actionId === 'start_battle_from_books') {
+      this.initGame(this.selectedStarterBookIds);
+    } else if (actionId === 'clear_starter_books') {
+      this.selectedStarterBookIds = [];
+      this.initGame([]);
+    } else if (actionId === 'back_to_diff_select') {
+      this.gameState = 'DIFF_SELECT';
+    } else if (actionId === 'open_codex') {
+      this.gameState = 'CODEX';
+      this.codexScrollY = 0;
+      this.selectedCodexBook = null;
+    } else if (actionId.startsWith('codex_inspect_')) {
+      this.selectedCodexBook = actionId.replace('codex_inspect_', '');
+    } else if (actionId === 'close_codex_detail') {
+      this.selectedCodexBook = null;
+    } else if (actionId.startsWith('filter_codex_')) {
+      this.codexFilter = actionId.replace('filter_codex_', '');
+    } else if (actionId === 'codex_scroll_up') {
+      this.codexScrollY = Math.max(0, this.codexScrollY - 220);
+    } else if (actionId === 'codex_scroll_down') {
+      this.codexScrollY = Math.min(2200, this.codexScrollY + 220);
     } else if (actionId === 'back_to_menu') {
       this.gameState = 'MAIN_MENU';
     } else if (actionId === 'back_to_char_select') {
@@ -821,7 +1046,7 @@ class Game {
     }
 
     if (this.gameState === 'PLAYING') {
-      if (!this.isPaused && !this.isLevelUpOpen && !this.isEvolutionOpen) {
+      if (!this.isPaused && !this.isLevelUpOpen && !this.isEvolutionOpen && !this.activeEvolutionModal) {
         this.update(delta);
       }
     } else {
@@ -943,6 +1168,29 @@ class Game {
             }
           }
         }
+
+        // --- GHI NHẬN TIẾN ĐỘ & RƠI SÁCH TRI THỨC (BOOK SYSTEM) ---
+        if (this.bookSystem) {
+          this.bookSystem.onEnemyKilled(killedEnemy, killedEnemy.isMiniBoss, killedEnemy.isMainBoss);
+
+          // Rơi Sách Khởi Đầu nếu kho sách còn ô trống và không bật Thử Thách Cấm Sách
+          if (!this.selectedChallenges.no_books && this.bookSystem.canPickUpMore()) {
+            const unownedStarters = STARTER_BOOK_IDS.filter(id => !this.bookSystem.hasBook(id));
+            if (unownedStarters.length > 0) {
+              const metaDropMult = (this.meta.upgrades.bookDropRate ? (1.0 + this.meta.upgrades.bookDropRate.level * 0.25) : 1.0);
+              let dropChance = 0;
+              if (killedEnemy.isMiniBoss) dropChance = 0.50;
+              else if (killedEnemy.isMainBoss) dropChance = 1.0;
+              else if (killedEnemy.isElite) dropChance = 0.12 * metaDropMult;
+              else dropChance = 0.007 * metaDropMult;
+
+              if (Math.random() < dropChance) {
+                const randomBookId = unownedStarters[Math.floor(Math.random() * unownedStarters.length)];
+                this.bookDrops.push(new BookDrop(killedEnemy.x, killedEnemy.y, randomBookId));
+              }
+            }
+          }
+        }
       };
 
       this.weaponManager.update(
@@ -1032,7 +1280,8 @@ class Game {
         const dist = Math.hypot(enemy.x - this.player.x, enemy.y - this.player.y);
         if (dist < enemy.getHitboxRadius() + this.player.getHitboxRadius()) {
           const hitSuccess = this.player.takeDamage(enemy.damage, {
-            attackerAccuracy: enemy.accuracy || 1.0
+            attackerAccuracy: enemy.accuracy || 1.0,
+            attacker: enemy
           }, this.particles);
 
           if (hitSuccess) {
@@ -1129,6 +1378,64 @@ class Game {
         }
       }
 
+      // 8.5. Nhặt Sách Khởi Đầu rơi ra từ quái (Book Drops)
+      for (let i = this.bookDrops.length - 1; i >= 0; i--) {
+        const drop = this.bookDrops[i];
+        drop.update(delta, this.player, this.bookSystem, (bookId, bookDef) => {
+          this.particles.createArcaneBlast(this.player.x, this.player.y, 2.0);
+          this.showGameToast(`📖 Đã nhặt sách: ${bookDef ? bookDef.work : bookId}`, '#fde047');
+        });
+        if (drop.isDead) {
+          this.bookDrops.splice(i, 1);
+        }
+      }
+
+      // 8.6. Cập nhật Hệ Thống Sách Tri Thức (Book System)
+      if (this.bookSystem) {
+        const bookEvent = this.bookSystem.update(delta, this.player);
+        if (bookEvent && bookEvent.triggerHugoWave) {
+          for (const enemy of this.enemies) {
+            if (enemy.isDead) continue;
+            enemy.applyDebuff('slow', 0.30, 6.0);
+          }
+          this.particles.createArcaneBlast(this.player.x, this.player.y, 4.0);
+          this.showGameToast('🌊 Sóng Chấn Động Les Misérables: Làm chậm 30% toàn bộ quái vật!', '#38bdf8');
+        }
+
+        // Kiểm tra mở bảng tiến hóa sách nếu có sách sẵn sàng (không đè lên lúc đang chọn nâng cấp Level-Up)
+        if (!this.isPaused && !this.isLevelUpOpen && !this.isEvolutionOpen && !this.activeEvolutionModal && (!this.pendingLevelUps || this.pendingLevelUps === 0)) {
+          if (this.bookSystem.pendingAwakenings && this.bookSystem.pendingAwakenings.length > 0) {
+            const awakening = this.bookSystem.pendingAwakenings.shift();
+            this.activeEvolutionModal = {
+              isAwakening: true,
+              targetId: awakening.targetId,
+              ingredientIds: awakening.ingredientIds || [],
+              isFusion: awakening.isFusion
+            };
+          } else if (this.bookSystem.pendingEvolutions.length > 0) {
+            const nextEv = this.bookSystem.pendingEvolutions[0];
+            let choices = [];
+            if (nextEv.targetId === 'choice_descartes') {
+              choices = ['heidegger', 'kant'];
+            } else if (nextEv.targetId === 'choice_kant') {
+              choices = ['hegel', 'feuerbach', 'nietzsche'];
+            } else {
+              choices = [nextEv.targetId];
+            }
+            this.activeEvolutionModal = {
+              sourceId: nextEv.sourceId,
+              targetId: nextEv.targetId,
+              choices: choices
+            };
+          }
+        }
+      }
+
+      if (this.gameToast && this.gameToast.timer > 0) {
+        this.gameToast.timer -= delta;
+        if (this.gameToast.timer <= 0) this.gameToast = null;
+      }
+
       // 9. Kiểm tra Hồi Sinh nếu vừa chết
       if (this.player.isDead) {
         this.skillManager.checkRevive(this.player, this.particles);
@@ -1184,6 +1491,9 @@ class Game {
         box.render(this.ctx, this.camera);
       }
       for (const drop of this.evolutionDrops) {
+        drop.render(this.ctx, this.camera);
+      }
+      for (const drop of this.bookDrops) {
         drop.render(this.ctx, this.camera);
       }
 
@@ -1270,9 +1580,19 @@ class Game {
         this.renderEvolutionModal();
       }
 
+      // 9.5. Bảng Tiến Hóa Sách Tri Thức (Book Evolution Modal)
+      if (this.activeEvolutionModal) {
+        this.renderBookEvolutionModal();
+      }
+
       // 10. Màn hình Tạm Dừng
       if (this.isPaused) {
         this.renderPauseMenu();
+      }
+
+      // 11. Toast thông báo trong trận
+      if (this.gameToast && this.gameToast.timer > 0) {
+        this.renderGameToast();
       }
       return;
     }
@@ -1295,6 +1615,12 @@ class Game {
         break;
       case 'DIFF_SELECT':
         this.renderDiffSelect();
+        break;
+      case 'BOOK_SELECT':
+        this.renderBookSelect();
+        break;
+      case 'CODEX':
+        this.renderCodex();
         break;
       case 'SHOP':
         this.renderShop();
@@ -1524,6 +1850,73 @@ class Game {
         this.ctx.font = 'bold 13px "Segoe UI", Arial, sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.fillText(`👑 ĐÃ THỨC TỈNH PHÙ THỦY VĨNH VIỄN (WITCH FORM)`, wBarX + wBarW / 2, wBarY + 16);
+      }
+    }
+
+    // --- HIỂN THỊ CÁC Ô SÁCH TRI THỨC (BOOK SLOTS) ---
+    this.hudBookSlotRects = [];
+    if (this.bookSystem) {
+      const maxSlots = this.bookSystem.maxSlots;
+      const bSlotW = 104;
+      const bSlotH = 42;
+      const bSlotGap = 8;
+      const bStartY = (this.player && this.player.hasWitchForm) ? (slotStartY + slotSize + 40) : (slotStartY + slotSize + 12);
+      let bX = hpBarX;
+
+      for (let i = 0; i < maxSlots; i++) {
+        const book = this.bookSystem.activeBooks[i];
+        const isReady = book && this.bookSystem.progress[book.id] && this.bookSystem.progress[book.id].readyToEvolve;
+
+        if (book) {
+          this.ctx.fillStyle = '#fcfbf7';
+          this.ctx.fillRect(bX, bStartY, bSlotW, bSlotH);
+
+          this.ctx.strokeStyle = isReady ? '#eab308' : '#2b241c';
+          this.ctx.lineWidth = isReady ? 2.5 : 1.2;
+          this.ctx.strokeRect(bX, bStartY, bSlotW, bSlotH);
+
+          this.ctx.strokeStyle = '#8a7968';
+          this.ctx.lineWidth = 0.8;
+          this.ctx.strokeRect(bX + 3, bStartY + 3, bSlotW - 6, bSlotH - 6);
+
+          this.ctx.fillStyle = '#1c1917';
+          this.ctx.font = 'bold 10px serif';
+          this.ctx.textAlign = 'center';
+          const title = book.def ? book.def.work : book.id;
+          const displayTitle = title.length > 14 ? title.substring(0, 13) + '…' : title;
+          this.ctx.fillText(displayTitle, bX + bSlotW / 2, bStartY + 18);
+
+          this.ctx.fillStyle = '#78716c';
+          this.ctx.font = '9px sans-serif';
+          const author = book.def ? book.def.author : '';
+          const displayAuthor = author.length > 15 ? author.substring(0, 14) + '…' : author;
+          this.ctx.fillText(displayAuthor, bX + bSlotW / 2, bStartY + 32);
+
+          if (isReady) {
+            this.ctx.fillStyle = '#eab308';
+            this.ctx.fillRect(bX + bSlotW - 14, bStartY + 2, 12, 12);
+            this.ctx.fillStyle = '#000000';
+            this.ctx.font = 'bold 9px sans-serif';
+            this.ctx.fillText('⚡', bX + bSlotW - 8, bStartY + 11);
+          }
+
+          this.hudBookSlotRects.push({ x: bX, y: bStartY, w: bSlotW, h: bSlotH, bookId: book.id, readyToEvolve: isReady });
+        } else {
+          this.ctx.fillStyle = 'rgba(15, 20, 30, 0.65)';
+          this.ctx.fillRect(bX, bStartY, bSlotW, bSlotH);
+          this.ctx.strokeStyle = '#334155';
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(bX, bStartY, bSlotW, bSlotH);
+
+          this.ctx.fillStyle = '#64748b';
+          this.ctx.font = 'italic 11px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText('📖 Ô Trống', bX + bSlotW / 2, bStartY + 25);
+
+          this.hudBookSlotRects.push({ x: bX, y: bStartY, w: bSlotW, h: bSlotH, bookId: null, readyToEvolve: false });
+        }
+
+        bX += bSlotW + bSlotGap;
       }
     }
 
@@ -1797,34 +2190,34 @@ class Game {
   renderPauseMenu() {
     this.ctx.save();
 
-    this.ctx.fillStyle = 'rgba(5, 8, 15, 0.85)';
+    this.ctx.fillStyle = 'rgba(5, 8, 15, 0.90)';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const panelW = 860;
-    const panelH = 610;
-    const panelX = this.canvas.width / 2 - panelW / 2;
-    const panelY = this.canvas.height / 2 - panelH / 2;
+    const panelW = 1820;
+    const panelH = 1010;
+    const panelX = 50;
+    const panelY = 35;
 
-    this.ctx.fillStyle = 'rgba(16, 24, 38, 0.96)';
+    this.ctx.fillStyle = 'rgba(16, 24, 38, 0.98)';
     this.ctx.fillRect(panelX, panelY, panelW, panelH);
     this.ctx.strokeStyle = '#d4af37';
     this.ctx.lineWidth = 2.5;
     this.ctx.strokeRect(panelX, panelY, panelW, panelH);
 
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 40px "Segoe UI", serif';
+    this.ctx.font = 'bold 36px "Segoe UI", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('ĐÃ TẠM DỪNG', this.canvas.width / 2, panelY + 54);
+    this.ctx.fillText('ĐÃ TẠM DỪNG', this.canvas.width / 2, panelY + 44);
 
     this.ctx.fillStyle = '#b0c4de';
-    this.ctx.font = '16px sans-serif';
-    this.ctx.fillText('Nhấn phím [P] hoặc [ESC] để tiếp tục chơi', this.canvas.width / 2, panelY + 84);
+    this.ctx.font = '15px sans-serif';
+    this.ctx.fillText('Nhấn phím [P] hoặc [ESC] để tiếp tục chơi', this.canvas.width / 2, panelY + 70);
 
-    // Bảng Thông Số Chiến Đấu Nhân Vật (Combat Stats Box)
+    // Bảng Thông Số Chiến Đấu Nhân Vật (Combat Stats Box) - 4 Cột Rộng Rãi
     const statsBoxX = panelX + 30;
-    const statsBoxY = panelY + 105;
+    const statsBoxY = panelY + 84;
     const statsBoxW = panelW - 60;
-    const statsBoxH = 82;
+    const statsBoxH = 80;
 
     this.ctx.fillStyle = 'rgba(10, 16, 30, 0.85)';
     this.ctx.fillRect(statsBoxX, statsBoxY, statsBoxW, statsBoxH);
@@ -1832,54 +2225,199 @@ class Game {
     this.ctx.lineWidth = 1.5;
     this.ctx.strokeRect(statsBoxX, statsBoxY, statsBoxW, statsBoxH);
 
-    // Dòng 1: Máu, Giáp, Phản Sát Thương
     this.ctx.font = 'bold 15px sans-serif';
     this.ctx.textAlign = 'left';
+
+    // Cột 1: Máu & Giáp
+    const col1X = statsBoxX + 40;
     this.ctx.fillStyle = '#f87171';
-    this.ctx.fillText(`❤️ MÁU: ${Math.round(this.player.health)} / ${this.player.maxHealth}`, statsBoxX + 20, statsBoxY + 30);
-
+    this.ctx.fillText(`❤️ MÁU: ${Math.round(this.player.health)} / ${this.player.maxHealth}`, col1X, statsBoxY + 32);
     this.ctx.fillStyle = '#38bdf8';
-    this.ctx.fillText(`🛡️ GIÁP: ${Math.round(this.player.armor)}`, statsBoxX + 240, statsBoxY + 30);
+    this.ctx.fillText(`🛡️ GIÁP: ${Math.round(this.player.armor)}`, col1X, statsBoxY + 62);
 
+    // Cột 2: Phản Đòn & Tốc Độ
+    const col2X = statsBoxX + 460;
     const refFlat = this.player.reflectFlat || 0;
     const refPct = Math.round((this.player.reflectPercent || 0) * 100);
     this.ctx.fillStyle = '#f43f5e';
-    this.ctx.fillText(`⚔️ PHẢN ĐÒN: ${refFlat}${refPct > 0 ? ` (+${refPct}%)` : ''}`, statsBoxX + 440, statsBoxY + 30);
-
-    // Dòng 2: Tốc độ, Chí mạng, Hồi phục
+    this.ctx.fillText(`⚔️ PHẢN ĐÒN: ${refFlat}${refPct > 0 ? ` (+${refPct}%)` : ''}`, col2X, statsBoxY + 32);
     this.ctx.fillStyle = '#4ade80';
-    this.ctx.fillText(`👟 TỐC ĐỘ: ${Math.round(this.player.speed)}`, statsBoxX + 20, statsBoxY + 62);
+    this.ctx.fillText(`👟 TỐC ĐỘ: ${Math.round(this.player.speed)}`, col2X, statsBoxY + 62);
 
+    // Cột 3: Chí Mạng & Hồi Máu
+    const col3X = statsBoxX + 890;
     this.ctx.fillStyle = '#facc15';
-    this.ctx.fillText(`💥 CHÍ MẠNG: ${Math.round(this.player.critChance * 100)}% (x${this.player.critDamage.toFixed(1)})`, statsBoxX + 240, statsBoxY + 62);
-
+    const totalCritChance = this.player.critChance + (this.player.bookStats ? (this.player.bookStats.critChance || 0) : 0);
+    const critPct = Math.round(totalCritChance * 100);
+    let critTierNote = '';
+    if (totalCritChance >= 2.0) {
+      critTierNote = ` [🔥Crit x${Math.floor(totalCritChance)}]`;
+    } else if (totalCritChance > 1.0) {
+      critTierNote = ` [🔥Crit x2: ${Math.round((totalCritChance - 1) * 100)}%]`;
+    }
+    this.ctx.fillText(`💥 CHÍ MẠNG: ${critPct}% (x${this.player.critDamage.toFixed(1)})${critTierNote}`, col3X, statsBoxY + 32);
     this.ctx.fillStyle = '#c084fc';
-    this.ctx.fillText(`🌿 HỒI MÁU: +${Math.round(this.player.masteryRegen || 0)}/s`, statsBoxX + 540, statsBoxY + 62);
+    this.ctx.fillText(`🌿 HỒI MÁU: +${Math.round(this.player.masteryRegen || 0)}/s`, col3X, statsBoxY + 62);
 
+    // Cột 4: Sát Thương Vũ Khí & Giảm Hồi Chiêu
+    const col4X = statsBoxX + 1330;
+    const bonusDmg = Math.round(((this.player.bookStats ? (this.player.bookStats.dmgMult || 0) : 0) + (this.player.bonusDmgMult || 0)) * 100);
+    this.ctx.fillStyle = '#fb923c';
+    this.ctx.fillText(`🔥 SÁT THƯƠNG: +${bonusDmg}%`, col4X, statsBoxY + 32);
+    const cdReduction = Math.round((this.player.bookStats ? (this.player.bookStats.cooldownReduction || 0) : 0) * 100);
+    this.ctx.fillStyle = '#a78bfa';
+    this.ctx.fillText(`⏳ HỒI CHIÊU: -${cdReduction}%`, col4X, statsBoxY + 62);
+
+    // --- KỆ SÁCH TRI THỨC ĐANG TRANG BỊ ---
+    this.pauseBookButtons = [];
+    const bookSecY = statsBoxY + statsBoxH + 16;
+    const maxBookSlots = this.bookSystem ? this.bookSystem.maxSlots : 3;
+    const activeBooks = this.bookSystem ? this.bookSystem.activeBooks : [];
+
+    this.ctx.fillStyle = '#fde047';
+    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText(`📚 KỆ SÁCH ĐANG TRANG BỊ (${activeBooks.length}/${maxBookSlots} Sách)`, statsBoxX, bookSecY + 16);
+
+    const cardW = 340;
+    const cardH = 500;
+    const gap = 24;
+    const totalW = maxBookSlots * cardW + (maxBookSlots - 1) * gap;
+    const startBX = panelX + (panelW - totalW) / 2;
+    const booksStartY = bookSecY + 28;
+
+    for (let i = 0; i < maxBookSlots; i++) {
+      const bX = startBX + i * (cardW + gap);
+      const book = activeBooks[i];
+
+      if (book) {
+        const p = this.bookSystem.progress[book.id];
+        const isReady = p && p.readyToEvolve;
+        const isPaused = p && p.paused;
+
+        this.ctx.fillStyle = 'rgba(25, 30, 42, 0.9)';
+        this.ctx.fillRect(bX, booksStartY, cardW, cardH);
+        this.ctx.strokeStyle = isReady ? '#eab308' : '#3a4a62';
+        this.ctx.lineWidth = isReady ? 2.5 : 1.5;
+        this.ctx.strokeRect(bX, booksStartY, cardW, cardH);
+
+        // Vẽ thẻ sách dọc (Portrait) tỷ lệ chuẩn 1 : 1.4 to rõ ràng
+        const bookCardW = 160;
+        const bookCardH = 224;
+        const bookCardX = bX + Math.round((cardW - bookCardW) / 2);
+        const bookCardY = booksStartY + 14;
+        this.bookSystem.renderBookCard(this.ctx, book.id, bookCardX, bookCardY, bookCardW, bookCardH, isReady);
+
+        // Tác giả
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+        this.ctx.textAlign = 'center';
+        const author = book.def ? book.def.author : '';
+        this.ctx.fillText(`✍️ ${author}`, bX + cardW / 2, booksStartY + 266);
+
+        // Mô tả buff (Tự ngắt dòng word-wrap đầy đủ không bị co chữ)
+        this.ctx.fillStyle = '#fde047';
+        this.ctx.font = '13.5px "Segoe UI", sans-serif';
+        const buffDesc = book.def ? (book.def.desc || book.def.buffDesc || '') : '';
+        const words = buffDesc.split(' ');
+        let bLine = '✨ ';
+        let bDescY = booksStartY + 295;
+        for (const w of words) {
+          const test = bLine + w + ' ';
+          if (this.ctx.measureText(test).width > cardW - 36) {
+            this.ctx.fillText(bLine, bX + cardW / 2, bDescY);
+            bLine = w + ' ';
+            bDescY += 20;
+          } else {
+            bLine = test;
+          }
+        }
+        if (bLine.trim()) {
+          this.ctx.fillText(bLine, bX + cardW / 2, bDescY);
+        }
+
+        // Nút bấm: Vứt Bỏ & Tiến Hóa
+        const btnH = 38;
+        const btnY = booksStartY + cardH - 52;
+        const discardW = (isReady || isPaused) ? 120 : 180;
+        const discardX = (isReady || isPaused) ? (bX + 24) : (bX + (cardW - discardW) / 2);
+
+        // Nút Vứt bỏ
+        this.ctx.fillStyle = '#991b1b';
+        this.ctx.fillRect(discardX, btnY, discardW, btnH);
+        this.ctx.strokeStyle = '#ef4444';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(discardX, btnY, discardW, btnH);
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+        this.ctx.fillText('🗑️ VỨT BỎ', discardX + discardW / 2, btnY + 24);
+        this.pauseBookButtons.push({ x: discardX, y: btnY, w: discardW, h: btnH, action: 'discard', bookId: book.id });
+
+        // Nút Tiến Hóa nếu sẵn sàng
+        if (isReady || isPaused) {
+          const evW = 140;
+          const evX = bX + cardW - evW - 24;
+          this.ctx.fillStyle = '#854d0e';
+          this.ctx.fillRect(evX, btnY, evW, btnH);
+          this.ctx.strokeStyle = '#eab308';
+          this.ctx.lineWidth = 1.5;
+          this.ctx.strokeRect(evX, btnY, evW, btnH);
+          this.ctx.fillStyle = '#fef08a';
+          this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+          this.ctx.fillText('⚡ TIẾN HÓA', evX + evW / 2, btnY + 24);
+          this.pauseBookButtons.push({ x: evX, y: btnY, w: evW, h: btnH, action: 'evolve', bookId: book.id });
+        }
+      } else {
+        // Ô sách trống
+        this.ctx.fillStyle = 'rgba(15, 20, 28, 0.65)';
+        this.ctx.fillRect(bX, booksStartY, cardW, cardH);
+        this.ctx.strokeStyle = '#2b3648';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(bX, booksStartY, cardW, cardH);
+
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = '36px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('📖', bX + cardW / 2, booksStartY + cardH / 2 - 24);
+
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = 'italic 16px "Segoe UI", sans-serif';
+        this.ctx.fillText('Ô Sách Còn Trống', bX + cardW / 2, booksStartY + cardH / 2 + 16);
+
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = '13px "Segoe UI", sans-serif';
+        this.ctx.fillText('Tiêu diệt quái để nhặt sách mới', bX + cardW / 2, booksStartY + cardH / 2 + 42);
+      }
+    }
+
+    // Phím tắt Debug Test
     this.ctx.textAlign = 'center';
     this.ctx.fillStyle = '#ff88aa';
-    this.ctx.font = '14px monospace';
-    this.ctx.fillText('Phím [1]: Sinh Tử Thần  |  Phím [2]: Sinh Gokucho  |  Phím [6]: Thức Tỉnh Witch', this.canvas.width / 2, panelY + 215);
-    this.ctx.fillText('Phím [4]: Nhận ngay 20 XP  |  Phím [5]: Max cấp vũ khí & Thả Rương Tiến Hóa', this.canvas.width / 2, panelY + 238);
+    this.ctx.font = '13px monospace';
+    this.ctx.fillText('Phím [1]: Sinh Tử Thần  |  Phím [2]: Sinh Gokucho  |  Phím [6]: Thức Tỉnh Witch  |  Phím [4]: Nhận 20 XP', this.canvas.width / 2, panelY + 750);
     this.ctx.fillStyle = '#4ade80';
-    this.ctx.fillText('⏩ Phím [7]: Tua +60s  |  ⏩ Phím [8]: Nhảy tới mốc Boss tiếp theo  |  ⏩ Phím [9]: Tua +3 phút', this.canvas.width / 2, panelY + 264);
+    this.ctx.fillText('⏩ Phím [7]: Tua +60s  |  ⏩ Phím [8]: Nhảy tới Boss tiếp theo  |  ⏩ Phím [9]: Tua +3 phút', this.canvas.width / 2, panelY + 774);
 
     // Cập nhật vị trí các nút trong pauseActions
     const p = this.pauseActions;
-    p.resume.x = this.canvas.width / 2 - 180;
-    p.resume.y = panelY + 300;
-    p.resume.w = 360;
-    p.resume.h = 58;
+    const btnW = 260;
+    const btnH = 56;
+    const btnY = panelY + 810;
 
-    p.saveExit.x = this.canvas.width / 2 - 290;
-    p.saveExit.y = panelY + 380;
-    p.saveExit.w = 270;
-    p.saveExit.h = 56;
+    p.resume.x = this.canvas.width / 2 - 420;
+    p.resume.y = btnY;
+    p.resume.w = btnW;
+    p.resume.h = btnH;
 
-    p.exitFinish.x = this.canvas.width / 2 + 20;
-    p.exitFinish.y = panelY + 380;
-    p.exitFinish.w = 270;
-    p.exitFinish.h = 56;
+    p.saveExit.x = this.canvas.width / 2 - btnW / 2;
+    p.saveExit.y = btnY;
+    p.saveExit.w = btnW;
+    p.saveExit.h = btnH;
+
+    p.exitFinish.x = this.canvas.width / 2 + 160;
+    p.exitFinish.y = btnY;
+    p.exitFinish.w = btnW;
+    p.exitFinish.h = btnH;
 
     // 1. Nút Tiếp Tục Chơi
     this.ctx.fillStyle = '#2d6a4f';
@@ -1888,8 +2426,8 @@ class Game {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(p.resume.x, p.resume.y, p.resume.w, p.resume.h);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 22px sans-serif';
-    this.ctx.fillText('▶ TIẾP TỤC CHƠI', p.resume.x + p.resume.w / 2, p.resume.y + 37);
+    this.ctx.font = 'bold 20px sans-serif';
+    this.ctx.fillText('▶ TIẾP TỤC CHƠI', p.resume.x + p.resume.w / 2, p.resume.y + 36);
 
     // 2. Nút Lưu & Thoát
     this.ctx.fillStyle = '#1e3a8a';
@@ -1913,8 +2451,8 @@ class Game {
 
     // Chú thích gợi ý
     this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = 'italic 16px sans-serif';
-    this.ctx.fillText('💡 "Lưu & Thoát" sẽ giữ nguyên cấp độ và trang bị để tiếp tục sau.', this.canvas.width / 2, panelY + 420);
+    this.ctx.font = 'italic 15px sans-serif';
+    this.ctx.fillText('💡 Có thể bấm "Vứt Bỏ" để giải phóng ô sách, hoặc "Tiến Hóa" để nâng cấp sách ngay trong trận.', this.canvas.width / 2, panelY + 910);
 
     this.ctx.restore();
   }
@@ -1993,19 +2531,21 @@ class Game {
       buttons.push({
         id: 'resume_saved_game',
         label: `▶️ TIẾP TỤC (Cấp ${savedInfo.level} - ⏱️ ${timeStr})`,
-        y: 415,
+        y: 405,
         color: '#1d4ed8',
         border: '#60a5fa'
       });
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 485, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 555, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 625, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 695, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 470, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 535, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 600, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 665, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 730, color: '#1e293b', border: '#475569' });
     } else {
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 435, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 510, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 585, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 660, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 420, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 485, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 550, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 615, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 680, color: '#1e293b', border: '#475569' });
     }
 
     for (const b of buttons) {
@@ -2584,16 +3124,16 @@ class Game {
     this.ctx.fillText('⬅ QUAY LẠI', backBtnX + startBattleW / 2, actionBtnY + 39);
     this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'back_to_challenge_select' });
 
-    // Start
+    // Chọn sách trước khi xuất trận
     this.ctx.fillStyle = '#b91c1c';
     this.ctx.fillRect(nextBtnX, actionBtnY, startBattleW, startBattleH);
     this.ctx.strokeStyle = '#ef4444';
     this.ctx.lineWidth = 2.5;
     this.ctx.strokeRect(nextBtnX, actionBtnY, startBattleW, startBattleH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 22px sans-serif';
-    this.ctx.fillText('🔥 XUẤT TRẬN NGAY 🔥', nextBtnX + startBattleW / 2, actionBtnY + 41);
-    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'start_battle_now' });
+    this.ctx.font = 'bold 20px sans-serif';
+    this.ctx.fillText('📖 CHỌN SÁCH KHỞI ĐẦU ➔', nextBtnX + startBattleW / 2, actionBtnY + 41);
+    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'goto_book_select' });
 
     this.ctx.restore();
   }
@@ -2632,51 +3172,58 @@ class Game {
     this.ctx.fillText('🎁 +1,000 VÀNG TEST', testGoldBtnX + testGoldBtnW / 2, testGoldBtnY + 24);
     this.menuButtons.push({ x: testGoldBtnX, y: testGoldBtnY, w: testGoldBtnW, h: testGoldBtnH, id: 'add_test_gold' });
 
-    // Danh sách 6 nâng cấp
+    // Danh sách 9 nâng cấp (Bố trí 2 cột đẹp mắt chuẩn Full HD 1080p)
     const upgrades = Object.values(this.meta.upgrades);
-    const itemW = 920;
-    const itemH = 90;
-    const startX = this.canvas.width / 2 - itemW / 2;
-    let startY = 175;
+    const itemW = 840;
+    const itemH = 92;
+    const col0X = this.canvas.width / 2 - itemW - 20;
+    const col1X = this.canvas.width / 2 + 20;
+    const baseStartY = 170;
 
-    for (const up of upgrades) {
+    for (let i = 0; i < upgrades.length; i++) {
+      const up = upgrades[i];
       const isMax = up.level >= up.maxLevel;
       const cost = this.meta.getCost(up.id);
       const canAfford = this.meta.gold >= cost && !isMax;
 
+      const col = i < 5 ? 0 : 1;
+      const row = i < 5 ? i : (i - 5);
+      const itemX = col === 0 ? col0X : col1X;
+      const itemY = baseStartY + row * (itemH + 14);
+
       this.ctx.fillStyle = 'rgba(20, 30, 48, 0.9)';
-      this.ctx.fillRect(startX, startY, itemW, itemH);
+      this.ctx.fillRect(itemX, itemY, itemW, itemH);
       this.ctx.strokeStyle = '#3a4d6b';
       this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(startX, startY, itemW, itemH);
+      this.ctx.strokeRect(itemX, itemY, itemW, itemH);
 
       // Icon & Tên
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = '36px sans-serif';
+      this.ctx.font = '34px sans-serif';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(up.icon, startX + 22, startY + 58);
+      this.ctx.fillText(up.icon, itemX + 18, itemY + 58);
 
-      this.ctx.font = 'bold 22px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
       this.ctx.fillStyle = '#ffd166';
-      this.ctx.fillText(up.name, startX + 80, startY + 36);
+      this.ctx.fillText(up.name, itemX + 75, itemY + 34);
 
       // Mô tả & Cấp độ
-      this.ctx.font = '16px sans-serif';
+      this.ctx.font = '15px sans-serif';
       this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.fillText(up.desc, startX + 80, startY + 66);
+      this.ctx.fillText(up.desc, itemX + 75, itemY + 65, itemW - 250);
 
       // Vạch hiển thị cấp độ
-      const pipX = startX + 540;
+      const pipX = itemX + itemW - 240;
       for (let p = 1; p <= up.maxLevel; p++) {
         this.ctx.fillStyle = p <= up.level ? '#ffd700' : '#334155';
-        this.ctx.fillRect(pipX + p * 16, startY + 35, 12, 20);
+        this.ctx.fillRect(pipX + p * 15, itemY + 36, 11, 20);
       }
 
       // Nút Mua Nâng Cấp
-      const buyBtnW = 150;
-      const buyBtnH = 50;
-      const buyBtnX = startX + itemW - buyBtnW - 20;
-      const buyBtnY = startY + (itemH - buyBtnH) / 2;
+      const buyBtnW = 135;
+      const buyBtnH = 48;
+      const buyBtnX = itemX + itemW - buyBtnW - 16;
+      const buyBtnY = itemY + (itemH - buyBtnH) / 2;
 
       this.ctx.fillStyle = isMax ? '#334155' : (canAfford ? '#2d6a4f' : '#7f1d1d');
       this.ctx.fillRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH);
@@ -2685,16 +3232,14 @@ class Game {
       this.ctx.strokeRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH);
 
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 18px sans-serif';
+      this.ctx.font = 'bold 17px sans-serif';
       this.ctx.textAlign = 'center';
       if (isMax) {
-        this.ctx.fillText('ĐÃ MAX', buyBtnX + buyBtnW / 2, buyBtnY + 31);
+        this.ctx.fillText('ĐÃ MAX', buyBtnX + buyBtnW / 2, buyBtnY + 30);
       } else {
-        this.ctx.fillText(`🪙 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 31);
+        this.ctx.fillText(`🪙 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 30);
       }
       this.menuButtons.push({ x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH, id: 'buy_upgrade_' + up.id });
-
-      startY += itemH + 16;
     }
 
     // Nút Quay lại Menu Chính
@@ -2811,7 +3356,7 @@ class Game {
     const bannerX = 50;
     const bannerY = 155;
     const bannerW = this.canvas.width - 100;
-    const bannerH = 100;
+    const bannerH = 106;
 
     this.ctx.fillStyle = 'rgba(22, 14, 40, 0.94)';
     this.ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
@@ -2819,10 +3364,10 @@ class Game {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(bannerX, bannerY, bannerW, bannerH);
 
-    // Cột 1 Banner: Avatar & Thông tin cơ bản
+    // Cột 1 Banner: Avatar Căn Giữa Chuẩn Tỉ Lệ & Thông tin nhân vật
     const avBoxX = bannerX + 18;
-    const avBoxY = bannerY + 12;
-    const avBoxSize = 76;
+    const avBoxSize = 78;
+    const avBoxY = bannerY + Math.round((bannerH - avBoxSize) / 2);
     this.ctx.fillStyle = 'rgba(10, 5, 20, 0.7)';
     this.ctx.fillRect(avBoxX, avBoxY, avBoxSize, avBoxSize);
     this.ctx.strokeStyle = '#fbbf24';
@@ -2831,38 +3376,50 @@ class Game {
 
     const cImg = getIconImage(selectedCharConfig.sprite);
     if (cImg && cImg.complete) {
+      const maxDrawW = avBoxSize - 14;
+      const maxDrawH = avBoxSize - 14;
+      let sW = cImg.naturalWidth || 48;
+      let sH = cImg.naturalHeight || 96;
       if (selectedCharConfig.spriteSheet) {
-        const fw = Math.floor(cImg.naturalWidth / selectedCharConfig.spriteSheet.cols);
-        const fh = Math.floor(cImg.naturalHeight / selectedCharConfig.spriteSheet.rows);
-        this.ctx.drawImage(cImg, 0, 0, fw, fh, avBoxX + 10, avBoxY + 10, avBoxSize - 20, avBoxSize - 20);
+        sW = Math.floor(cImg.naturalWidth / selectedCharConfig.spriteSheet.cols);
+        sH = Math.floor(cImg.naturalHeight / selectedCharConfig.spriteSheet.rows);
+      }
+      const scale = Math.min(maxDrawW / sW, maxDrawH / sH);
+      const drawW = Math.round(sW * scale);
+      const drawH = Math.round(sH * scale);
+      const drawX = Math.round(avBoxX + (avBoxSize - drawW) / 2);
+      const drawY = Math.round(avBoxY + (avBoxSize - drawH) / 2);
+
+      if (selectedCharConfig.spriteSheet) {
+        this.ctx.drawImage(cImg, 0, 0, sW, sH, drawX, drawY, drawW, drawH);
       } else {
-        this.ctx.drawImage(cImg, avBoxX + 12, avBoxY + 5, avBoxSize - 24, avBoxSize - 10);
+        this.ctx.drawImage(cImg, drawX, drawY, drawW, drawH);
       }
     }
 
-    const infoTextX = avBoxX + avBoxSize + 22;
+    const infoTextX = avBoxX + avBoxSize + 20;
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffea79';
-    this.ctx.font = 'bold 22px "Segoe UI", sans-serif';
-    this.ctx.fillText(selectedCharConfig.name, infoTextX, bannerY + 36);
+    this.ctx.font = 'bold 21px "Segoe UI", sans-serif';
+    this.ctx.fillText(selectedCharConfig.name, infoTextX, bannerY + 34);
 
     this.ctx.fillStyle = '#c084fc';
-    this.ctx.font = 'italic 15px sans-serif';
-    this.ctx.fillText(selectedCharConfig.title, infoTextX, bannerY + 58);
+    this.ctx.font = 'italic 14px "Segoe UI", sans-serif';
+    this.ctx.fillText(selectedCharConfig.title, infoTextX, bannerY + 56);
 
     this.ctx.fillStyle = '#f59e0b';
-    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
-    this.ctx.fillText(`⭐ THÔNG THẠO: CẤP ${charMastery.level} / 100`, infoTextX, bannerY + 84);
+    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    this.ctx.fillText(`⭐ THÔNG THẠO: CẤP ${charMastery.level} / 100`, infoTextX, bannerY + 82);
 
-    // Cột 2 Banner: Thanh tiến trình Score & Nút Nâng Cấp Thông Thạo
-    const progX = bannerX + 440;
-    const progY = bannerY + 22;
-    const progW = 300;
-    const progH = 24;
+    // Cột 2 Banner: Thanh tiến trình Score & Nút Nâng Cấp (Căn chuẩn hàng ngang Y: bannerY + 36, H: 42)
+    const progX = bannerX + 415;
+    const progY = bannerY + 36;
+    const progW = 280;
+    const progH = 42;
 
     this.ctx.fillStyle = '#e2e8f0';
-    this.ctx.font = 'bold 15px sans-serif';
-    this.ctx.fillText(`Điểm Score Tích Lũy: ${charMastery.score.toLocaleString()} Score`, progX, progY - 8);
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.fillText(`Điểm Score Tích Lũy: ${charMastery.score.toLocaleString()} Score`, progX, bannerY + 26);
 
     // Thanh đo
     this.ctx.fillStyle = 'rgba(10, 8, 20, 0.9)';
@@ -2883,104 +3440,106 @@ class Game {
     this.ctx.fillText(
       isMaxMastery ? 'MAX CẤP (100/100)' : `${charMastery.score.toLocaleString()} / ${neededScore.toLocaleString()} (${Math.floor(scoreRatio * 100)}%)`,
       progX + progW / 2,
-      progY + 17
+      progY + 26
     );
 
     // Nút Nâng 1 Cấp
     const upBtnW = 135;
-    const upBtnH = 44;
-    const upBtnX = progX + progW + 16;
-    const upBtnY = bannerY + 28;
+    const upBtnH = 42;
+    const upBtnX = progX + progW + 12;
+    const upBtnY = bannerY + 36;
     this.ctx.fillStyle = canLevelUp ? '#15803d' : '#1e293b';
     this.ctx.fillRect(upBtnX, upBtnY, upBtnW, upBtnH);
     this.ctx.strokeStyle = canLevelUp ? '#4ade80' : '#475569';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(upBtnX, upBtnY, upBtnW, upBtnH);
     this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
-    this.ctx.font = 'bold 14px sans-serif';
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(isMaxMastery ? 'ĐÃ ĐẠT MAX' : '⬆️ NÂNG 1 CẤP', upBtnX + upBtnW / 2, upBtnY + 28);
+    this.ctx.fillText(isMaxMastery ? 'ĐÃ ĐẠT MAX' : '⬆️ NÂNG 1 CẤP', upBtnX + upBtnW / 2, upBtnY + 26);
     this.menuButtons.push({ x: upBtnX, y: upBtnY, w: upBtnW, h: upBtnH, id: 'level_up_mastery' });
 
     // Nút Nâng Tối Đa
     const maxBtnW = 125;
-    const maxBtnH = 44;
+    const maxBtnH = 42;
     const maxBtnX = upBtnX + upBtnW + 8;
-    const maxBtnY = upBtnY;
+    const maxBtnY = bannerY + 36;
     this.ctx.fillStyle = canLevelUp ? '#b45309' : '#1e293b';
     this.ctx.fillRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
     this.ctx.strokeStyle = canLevelUp ? '#fde047' : '#475569';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
     this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
-    this.ctx.font = 'bold 14px sans-serif';
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('🚀 NÂNG MAX', maxBtnX + maxBtnW / 2, maxBtnY + 28);
+    this.ctx.fillText('🚀 NÂNG MAX', maxBtnX + maxBtnW / 2, maxBtnY + 26);
     this.menuButtons.push({ x: maxBtnX, y: maxBtnY, w: maxBtnW, h: maxBtnH, id: 'level_up_max_mastery' });
 
     // Nút Nhận Score Test
     const testBtnW = 115;
-    const testBtnH = 44;
+    const testBtnH = 42;
     const testBtnX = maxBtnX + maxBtnW + 8;
-    const testBtnY = upBtnY;
+    const testBtnY = bannerY + 36;
     this.ctx.fillStyle = '#4c1d95';
     this.ctx.fillRect(testBtnX, testBtnY, testBtnW, testBtnH);
     this.ctx.strokeStyle = '#a855f7';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(testBtnX, testBtnY, testBtnW, testBtnH);
     this.ctx.fillStyle = '#fde047';
-    this.ctx.font = 'bold 13px sans-serif';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('🎁 +10K SCORE', testBtnX + testBtnW / 2, testBtnY + 28);
+    this.ctx.fillText('🎁 +10K SCORE', testBtnX + testBtnW / 2, testBtnY + 26);
     this.menuButtons.push({ x: testBtnX, y: testBtnY, w: testBtnW, h: testBtnH, id: 'add_test_score' });
 
-    // Cột 3 Banner: Điểm Kỹ Năng & 2 Nút Reset
+    // Cột 3 Banner: Điểm Kỹ Năng & 2 Nút Reset (Cùng hàng Y: bannerY + 36)
     let allocatedSkillPoints = 0;
     for (const key of Object.keys(SKILL_TREE_DEFINITIONS)) {
       allocatedSkillPoints += (charMastery.skills[key] || 0);
     }
 
-    const skillBoxX = testBtnX + testBtnW + 24;
+    const skillBoxX = testBtnX + testBtnW + 20;
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#fde047';
-    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
-    this.ctx.fillText(`🌟 ĐIỂM KỸ NĂNG: ${charMastery.skillPoints}`, skillBoxX, bannerY + 44);
+    this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+    this.ctx.fillText(`🌟 ĐIỂM KỸ NĂNG: ${charMastery.skillPoints}`, skillBoxX, bannerY + 48);
 
     this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '13px sans-serif';
-    this.ctx.fillText(`Đã cộng: ${allocatedSkillPoints} điểm`, skillBoxX, bannerY + 68);
-
-    // Nút 1: Tẩy Toàn Bộ Điểm Kỹ Năng (Hoàn Điểm Kỹ Năng)
-    const hasAllocated = allocatedSkillPoints > 0;
-    const resetBtnW = 155;
-    const resetBtnH = 44;
-    const resetBtnX = bannerX + bannerW - resetBtnW - 170;
-    const resetBtnY = bannerY + 28;
-    this.ctx.fillStyle = hasAllocated ? '#831843' : '#1e293b';
-    this.ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-    this.ctx.strokeStyle = hasAllocated ? '#f472b6' : '#475569';
-    this.ctx.lineWidth = hasAllocated ? 2 : 1;
-    this.ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-    this.ctx.fillStyle = hasAllocated ? '#ffffff' : '#64748b';
-    this.ctx.font = 'bold 13px sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('🔄 TẨY KỸ NĂNG', resetBtnX + resetBtnW / 2, resetBtnY + 27);
-    this.menuButtons.push({ x: resetBtnX, y: resetBtnY, w: resetBtnW, h: resetBtnH, id: 'reset_mastery_skills' });
+    this.ctx.font = '13px "Segoe UI", sans-serif';
+    this.ctx.fillText(`Đã cộng: ${allocatedSkillPoints} điểm`, skillBoxX, bannerY + 70);
 
     // Nút 2: Tẩy Cấp Thông Thạo (Reset về Cấp 1 & Hoàn 100% Score)
     const hasLevel = charMastery.level > 1;
     const resetLvlBtnW = 160;
-    const resetLvlBtnH = 44;
-    const resetLvlBtnX = bannerX + bannerW - resetLvlBtnW - 6;
-    const resetLvlBtnY = bannerY + 28;
+    const resetLvlBtnH = 42;
+    const resetLvlBtnX = bannerX + bannerW - resetLvlBtnW - 14;
+    const resetLvlBtnY = bannerY + 36;
     this.ctx.fillStyle = hasLevel ? '#7c2d12' : '#1e293b';
     this.ctx.fillRect(resetLvlBtnX, resetLvlBtnY, resetLvlBtnW, resetLvlBtnH);
     this.ctx.strokeStyle = hasLevel ? '#fb923c' : '#475569';
     this.ctx.lineWidth = hasLevel ? 2 : 1;
     this.ctx.strokeRect(resetLvlBtnX, resetLvlBtnY, resetLvlBtnW, resetLvlBtnH);
     this.ctx.fillStyle = hasLevel ? '#ffffff' : '#64748b';
-    this.ctx.font = 'bold 13px sans-serif';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
+    this.ctx.fillText('♻️ TẨY CẤP & SCORE', resetLvlBtnX + resetLvlBtnW / 2, resetLvlBtnY + 26);
+    this.menuButtons.push({ x: resetLvlBtnX, y: resetLvlBtnY, w: resetLvlBtnW, h: resetLvlBtnH, id: 'reset_mastery_level' });
+
+    // Nút 1: Tẩy Toàn Bộ Điểm Kỹ Năng (Hoàn Điểm Kỹ Năng)
+    const hasAllocated = allocatedSkillPoints > 0;
+    const resetBtnW = 150;
+    const resetBtnH = 42;
+    const resetBtnX = resetLvlBtnX - resetBtnW - 10;
+    const resetBtnY = bannerY + 36;
+    this.ctx.fillStyle = hasAllocated ? '#831843' : '#1e293b';
+    this.ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
+    this.ctx.strokeStyle = hasAllocated ? '#f472b6' : '#475569';
+    this.ctx.lineWidth = hasAllocated ? 2 : 1;
+    this.ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
+    this.ctx.fillStyle = hasAllocated ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🔄 TẨY KỸ NĂNG', resetBtnX + resetBtnW / 2, resetBtnY + 26);
+    this.menuButtons.push({ x: resetBtnX, y: resetBtnY, w: resetBtnW, h: resetBtnH, id: 'reset_mastery_skills' });
     this.ctx.fillText('♻️ TẨY CẤP & SCORE', resetLvlBtnX + resetLvlBtnW / 2, resetLvlBtnY + 27);
     this.menuButtons.push({ x: resetLvlBtnX, y: resetLvlBtnY, w: resetLvlBtnW, h: resetLvlBtnH, id: 'reset_mastery_level' });
 
@@ -3271,8 +3830,8 @@ class Game {
     }
 
     // Bảng thống kê chi tiết điểm số & vàng
-    const statBoxW = 820;
-    const statBoxH = 540;
+    const statBoxW = 940;
+    const statBoxH = 550;
     const statBoxX = this.canvas.width / 2 - statBoxW / 2;
     const statBoxY = 160;
 
@@ -3285,46 +3844,56 @@ class Game {
     const minutes = Math.floor(s.survivalTime / 60);
     const seconds = Math.floor(s.survivalTime % 60);
 
-    const leftX = statBoxX + 50;
+    const leftX = statBoxX + 45;
+    const rightX = statBoxX + statBoxW - 45;
     let textY = statBoxY + 55;
 
     this.ctx.font = '21px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`⏱️ Thời gian sống sót:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText(`${minutes} phút ${seconds} giây`, leftX + 340, textY);
+    this.ctx.fillText(`${minutes} phút ${seconds} giây`, rightX, textY);
 
     textY += 44;
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`💀 Số quái vật tiêu diệt:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#ff88aa';
-    this.ctx.fillText(`${s.kills} quái`, leftX + 340, textY);
+    this.ctx.fillText(`${s.kills} quái`, rightX, textY);
 
     textY += 44;
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`⭐ Cấp độ đạt được:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#00b4d8';
-    this.ctx.fillText(`Cấp ${s.level}`, leftX + 340, textY);
+    this.ctx.fillText(`Cấp ${s.level}`, rightX, textY);
 
     textY += 44;
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`⚔️ Chế độ & Độ khó:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = this.selectedDiff.color;
-    this.ctx.fillText(`${this.selectedMode.name} - ${this.selectedDiff.name}`, leftX + 340, textY);
+    this.ctx.fillText(`${this.selectedMode.name} - ${this.selectedDiff.name}`, rightX, textY);
 
     textY += 44;
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.fillText(`🔥 Thưởng Thử Thách:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     if (s.qualifiedForChallengeBonus && s.challengeScoreBonus > 0) {
       this.ctx.fillStyle = '#4ade80';
-      this.ctx.fillText(`+${Math.round(s.challengeScoreBonus * 100)}% Điểm  |  +${Math.round(s.challengeGoldBonus * 100)}% Vàng`, leftX + 340, textY);
+      this.ctx.fillText(`+${Math.round(s.challengeScoreBonus * 100)}% Điểm  |  +${Math.round(s.challengeGoldBonus * 100)}% Vàng`, rightX, textY);
     } else if (!s.qualifiedForChallengeBonus && (s.activeChallenges && s.activeChallenges.length > 0)) {
       this.ctx.fillStyle = '#f87171';
-      this.ctx.fillText(`Chưa đạt 2 phút (không kích hoạt bonus)`, leftX + 340, textY);
+      this.ctx.fillText(`Chưa đạt 2 phút (không kích hoạt bonus)`, rightX, textY);
     } else {
       this.ctx.fillStyle = '#94a3b8';
-      this.ctx.fillText(`Không có thử thách`, leftX + 340, textY);
+      this.ctx.fillText(`Không có thử thách`, rightX, textY);
     }
 
     // Đường kẻ phân cách
@@ -3333,32 +3902,40 @@ class Game {
     this.ctx.lineWidth = 1.5;
     this.ctx.beginPath();
     this.ctx.moveTo(leftX, textY);
-    this.ctx.lineTo(leftX + 720, textY);
+    this.ctx.lineTo(rightX, textY);
     this.ctx.stroke();
 
     // Điểm số & Tiền thưởng
     textY += 46;
     this.ctx.font = 'bold 26px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffd166';
     this.ctx.fillText(`🏆 TỔNG ĐIỂM SỐ:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText(`${s.score.toLocaleString()} ĐIỂM`, leftX + 340, textY);
+    this.ctx.fillText(`${s.score.toLocaleString()} ĐIỂM`, rightX, textY);
 
     textY += 44;
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffd700';
     this.ctx.fillText(`🪙 VÀNG THU THẬP:`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#ffe600';
-    this.ctx.fillText(`+${s.goldEarned} Vàng`, leftX + 340, textY);
+    this.ctx.fillText(`+${s.goldEarned} Vàng`, rightX, textY);
 
     textY += 44;
+    this.ctx.font = 'bold 22px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#c084fc';
     this.ctx.fillText(`🔮 THÔNG THẠO (${s.charName || 'Nhân Vật'}):`, leftX, textY);
+    this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#fde047';
     if (s.charMastery) {
-      this.ctx.fillText(`+${s.score.toLocaleString()} Score (Cấp ${s.charMastery.level}/100)`, leftX + 340, textY);
+      this.ctx.fillText(`+${s.score.toLocaleString()} Score (Cấp ${s.charMastery.level}/100)`, rightX, textY);
     } else {
-      this.ctx.fillText(`+${s.score.toLocaleString()} Score`, leftX + 340, textY);
+      this.ctx.fillText(`+${s.score.toLocaleString()} Score`, rightX, textY);
     }
+    this.ctx.textAlign = 'left';
 
     // 2 Nút: Chơi Lại hoặc Về Menu Chính
     const btnW = 320;
@@ -3389,6 +3966,1011 @@ class Game {
     this.ctx.fillText('🔄 CHƠI LẠI TRẬN NÀY', retryBtnX + btnW / 2, btnY + 38);
     this.menuButtons.push({ x: retryBtnX, y: btnY, w: btnW, h: btnH, id: 'start_battle_now' });
 
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MÀN HÌNH BẢNG TIẾN HÓA SÁCH (BOOK EVOLUTION MODAL) - MỞ RỘNG & DỪNG THỜI GIAN
+  // =========================================================================
+  renderBookEvolutionModal() {
+    if (!this.activeEvolutionModal) return;
+    const modal = this.activeEvolutionModal;
+
+    // XỬ LÝ RIÊNG: MODAL THỨC TỈNH ẨN / HỢP THỂ THẦN THOẠI TRONG TRẬN
+    if (modal.isAwakening) {
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(6, 4, 10, 0.95)';
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+      const targetId = modal.targetId;
+      const targetDef = BOOK_DEFINITIONS[targetId];
+      const isFusion = modal.isFusion;
+
+      const modalW = 1200;
+      const modalH = 720;
+      const modalX = Math.round((this.canvas.width - modalW) / 2);
+      const modalY = Math.round((this.canvas.height - modalH) / 2);
+
+      // Khung bảng hoàng kim lộng lẫy
+      this.ctx.fillStyle = 'rgba(16, 12, 25, 0.98)';
+      this.ctx.fillRect(modalX, modalY, modalW, modalH);
+      this.ctx.strokeStyle = '#ffd700';
+      this.ctx.lineWidth = 3.5;
+      this.ctx.strokeRect(modalX, modalY, modalW, modalH);
+
+      // Tiêu đề
+      this.ctx.fillStyle = isFusion ? '#f59e0b' : '#38bdf8';
+      this.ctx.font = 'bold 36px "Segoe UI", serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(
+        isFusion ? '🔮 TÁC PHẨM ẨN: HỢP THỂ THẦN THOẠI 🔮' : '🌟 TÁC PHẨM ẨN ĐÃ THỨC TỈNH 🌟',
+        this.canvas.width / 2,
+        modalY + 58
+      );
+
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = '16px "Segoe UI", sans-serif';
+      this.ctx.fillText(
+        isFusion
+          ? 'Các tác phẩm kinh điển đã dung hợp để khai sinh một Tuyệt Phẩm mới!'
+          : 'Bạn đã đạt điều kiện bí ẩn và đánh thức một tác phẩm kinh điển thất truyền!',
+        this.canvas.width / 2,
+        modalY + 92
+      );
+
+      this.ctx.fillStyle = '#38bdf8';
+      this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+      this.ctx.fillText('⏱️ TRẬN ĐẤU ĐÃ TẠM DỪNG THỜI GIAN', this.canvas.width / 2, modalY + 118);
+
+      if (isFusion && modal.ingredientIds && modal.ingredientIds.length > 0) {
+        // Hợp thể nhiều sách thành phần
+        const ingCount = modal.ingredientIds.length;
+        const ingCardW = 110;
+        const ingCardH = 154;
+        const totalIngW = ingCount * ingCardW + (ingCount - 1) * 36;
+        const startIngX = modalX + 60 + (440 - totalIngW) / 2;
+        const ingY = modalY + 200;
+
+        for (let i = 0; i < ingCount; i++) {
+          const ingId = modal.ingredientIds[i];
+          const ix = startIngX + i * (ingCardW + 36);
+          this.bookSystem.renderBookCard(this.ctx, ingId, ix, ingY, ingCardW, ingCardH, false);
+          if (i < ingCount - 1) {
+            this.ctx.fillStyle = '#fde047';
+            this.ctx.font = 'bold 28px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('+', ix + ingCardW + 18, ingY + ingCardH / 2 + 10);
+          }
+        }
+
+        // Mũi tên
+        this.ctx.fillStyle = '#ffd700';
+        this.ctx.font = 'bold 50px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('➔', modalX + 540, ingY + ingCardH / 2 + 12);
+
+        // Thẻ kết quả hợp thể bên phải
+        const outW = 180;
+        const outH = 252;
+        const outX = modalX + 600;
+        const outY = modalY + 160;
+        this.bookSystem.renderBookCard(this.ctx, targetId, outX, outY, outW, outH, true);
+
+        // Chi tiết tác giả & buffs
+        const descX = modalX + 820;
+        const maxDescW = modalW - 860;
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#ffd166';
+        this.ctx.font = 'bold 24px "Playfair Display", Georgia, serif';
+        this.ctx.fillText(targetDef ? targetDef.work : targetId, descX, outY + 36, maxDescW);
+
+        this.ctx.fillStyle = '#cbd5e1';
+        this.ctx.font = 'italic 16px "Segoe UI", sans-serif';
+        this.ctx.fillText(`✍️ Tác giả: ${targetDef ? targetDef.author : 'Ẩn danh'}`, descX, outY + 70, maxDescW);
+
+        this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        this.ctx.moveTo(descX, outY + 85);
+        this.ctx.lineTo(descX + maxDescW, outY + 85);
+        this.ctx.stroke();
+
+        this.ctx.fillStyle = '#4ade80';
+        this.ctx.font = '14.5px "Segoe UI", sans-serif';
+        const buffWords = (targetDef ? (targetDef.desc || targetDef.buffDesc || '') : '').split(' ');
+        let bLine = '✨ ';
+        let bY = outY + 115;
+        for (const w of buffWords) {
+          const test = bLine + w + ' ';
+          if (this.ctx.measureText(test).width > maxDescW) {
+            this.ctx.fillText(bLine, descX, bY);
+            bLine = w + ' ';
+            bY += 24;
+          } else {
+            bLine = test;
+          }
+        }
+        if (bLine.trim()) {
+          this.ctx.fillText(bLine, descX, bY);
+        }
+      } else {
+        // Độc lập (Camus / Adam Smith)
+        const outW = 200;
+        const outH = 280;
+        const outX = this.canvas.width / 2 - outW / 2;
+        const outY = modalY + 150;
+        this.bookSystem.renderBookCard(this.ctx, targetId, outX, outY, outW, outH, true);
+
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ffd166';
+        this.ctx.font = 'bold 26px "Playfair Display", Georgia, serif';
+        this.ctx.fillText(targetDef ? targetDef.work : targetId, this.canvas.width / 2, outY + outH + 36);
+
+        this.ctx.fillStyle = '#cbd5e1';
+        this.ctx.font = 'italic 16px "Segoe UI", sans-serif';
+        this.ctx.fillText(`✍️ Tác giả: ${targetDef ? targetDef.author : 'Ẩn danh'}`, this.canvas.width / 2, outY + outH + 66);
+
+        this.ctx.fillStyle = '#4ade80';
+        this.ctx.font = '15px "Segoe UI", sans-serif';
+        const buffWords = (targetDef ? (targetDef.desc || targetDef.buffDesc || '') : '').split(' ');
+        let bLine = '✨ ';
+        let bY = outY + outH + 96;
+        for (const w of buffWords) {
+          const test = bLine + w + ' ';
+          if (this.ctx.measureText(test).width > modalW - 160) {
+            this.ctx.fillText(bLine, this.canvas.width / 2, bY);
+            bLine = w + ' ';
+            bY += 22;
+          } else {
+            bLine = test;
+          }
+        }
+        if (bLine.trim()) {
+          this.ctx.fillText(bLine, this.canvas.width / 2, bY);
+        }
+      }
+
+      // Nút Tiếp tục trận đấu
+      const cBtnW = 340;
+      const cBtnH = 56;
+      const cBtnX = this.canvas.width / 2 - cBtnW / 2;
+      const cBtnY = modalY + modalH - 85;
+
+      this.ctx.fillStyle = '#15803d';
+      this.ctx.fillRect(cBtnX, cBtnY, cBtnW, cBtnH);
+      this.ctx.strokeStyle = '#4ade80';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.strokeRect(cBtnX, cBtnY, cBtnW, cBtnH);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⚡ TIẾP TỤC TRẬN ĐẤU', cBtnX + cBtnW / 2, cBtnY + 36);
+
+      this.evolutionModalContinueBtn = { x: cBtnX, y: cBtnY, w: cBtnW, h: cBtnH };
+      this.ctx.restore();
+      return;
+    }
+
+    const srcDef = BOOK_DEFINITIONS[modal.sourceId];
+
+    this.ctx.save();
+
+    // Lớp phủ đen ma thuật mờ nền
+    this.ctx.fillStyle = 'rgba(6, 4, 10, 0.94)';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const isMultiChoice = modal.choices.length > 1;
+    const modalW = isMultiChoice ? 1260 : 1160;
+    const modalH = 680;
+    const modalX = Math.round((this.canvas.width - modalW) / 2);
+    const modalY = Math.round((this.canvas.height - modalH) / 2);
+
+    // Khung bảng tiến hóa mở rộng to đẹp, viền vàng kim
+    this.ctx.fillStyle = 'rgba(18, 14, 26, 0.98)';
+    this.ctx.fillRect(modalX, modalY, modalW, modalH);
+    this.ctx.strokeStyle = '#ffd700';
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeRect(modalX, modalY, modalW, modalH);
+
+    // Tiêu đề
+    this.ctx.fillStyle = '#ffd700';
+    this.ctx.font = 'bold 38px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⚡ TÁC PHẨM SẴN SÀNG TIẾN CẤP ⚡', this.canvas.width / 2, modalY + 62);
+
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '16px "Segoe UI", sans-serif';
+    this.ctx.fillText(
+      isMultiChoice
+        ? 'Hãy chọn 1 trong các hướng phát triển tiếp theo của tác phẩm:'
+        : 'Tác phẩm đã sẵn sàng tiến cấp! Bạn muốn tiến cấp ngay hay tạm dừng?',
+      this.canvas.width / 2,
+      modalY + 95
+    );
+
+    // Dòng thông báo dừng thời gian rõ ràng
+    this.ctx.fillStyle = '#38bdf8';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.fillText('⏱️ TRẬN ĐẤU ĐÃ TẠM DỪNG THỜI GIAN', this.canvas.width / 2, modalY + 120);
+
+    this.evolutionChoiceBtns = [];
+
+    if (!isMultiChoice) {
+      const targetId = modal.choices[0];
+      const targetDef = BOOK_DEFINITIONS[targetId];
+      const srcDef = BOOK_DEFINITIONS[modal.sourceId];
+
+      // Thẻ sách hiện tại (Bên trái) - Khổ Dọc Chuẩn To Rõ
+      const cardW = 180;
+      const cardH = 252;
+      const srcX = modalX + 160;
+      const cardY = modalY + 160;
+
+      this.ctx.fillStyle = '#fde047';
+      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('📖 HIỆN TẠI', srcX + cardW / 2, cardY - 14);
+      this.bookSystem.renderBookCard(this.ctx, modal.sourceId, srcX, cardY, cardW, cardH, false);
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+      this.ctx.fillText(`✍️ ${srcDef ? srcDef.author : ''}`, srcX + cardW / 2, cardY + cardH + 28);
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '13.5px "Segoe UI", sans-serif';
+      this.ctx.fillText(srcDef ? (srcDef.desc || srcDef.buffDesc || '') : '', srcX + cardW / 2, cardY + cardH + 54, 320);
+
+      // Mũi tên tiến cấp ở giữa
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.font = 'bold 56px sans-serif';
+      this.ctx.fillText('➔', this.canvas.width / 2, cardY + cardH / 2 + 10);
+
+      // Thẻ sách tiến cấp mới (Bên phải)
+      const targetX = modalX + modalW - cardW - 160;
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.fillText('✨ TIẾN CẤP MỚI', targetX + cardW / 2, cardY - 14);
+      this.bookSystem.renderBookCard(this.ctx, targetId, targetX, cardY, cardW, cardH, true);
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+      this.ctx.fillText(`✍️ ${targetDef ? targetDef.author : ''}`, targetX + cardW / 2, cardY + cardH + 28);
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      this.ctx.fillText(`✨ ${targetDef ? (targetDef.desc || targetDef.buffDesc || '') : ''}`, targetX + cardW / 2, cardY + cardH + 54, 320);
+
+      // 2 Nút: [⚡ TIẾN HÓA NGAY] và [⏸️ TẠM DỪNG]
+      const btnW = 320;
+      const btnH = 58;
+      const btnY = modalY + modalH - 85;
+      const evBtnX = this.canvas.width / 2 - btnW - 20;
+      const pauseBtnX = this.canvas.width / 2 + 20;
+
+      // Nút Tiến Hóa Ngay
+      this.ctx.fillStyle = '#15803d';
+      this.ctx.fillRect(evBtnX, btnY, btnW, btnH);
+      this.ctx.strokeStyle = '#4ade80';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.strokeRect(evBtnX, btnY, btnW, btnH);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⚡ TIẾN HÓA NGAY', evBtnX + btnW / 2, btnY + 36);
+
+      this.evolutionChoiceBtns.push({ x: evBtnX, y: btnY, w: btnW, h: btnH, targetId: targetId });
+
+      // Nút Tạm Dừng
+      this.ctx.fillStyle = '#1e293b';
+      this.ctx.fillRect(pauseBtnX, btnY, btnW, btnH);
+      this.ctx.strokeStyle = '#60a5fa';
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(pauseBtnX, btnY, btnW, btnH);
+      this.ctx.fillStyle = '#93c5fd';
+      this.ctx.fillText('⏸️ TẠM DỪNG', pauseBtnX + btnW / 2, btnY + 36);
+
+      this.evolutionModalPauseBtn = { x: pauseBtnX, y: btnY, w: btnW, h: btnH };
+    } else {
+      // Nhiều lựa chọn (Descartes: Heidegger / Kant hoặc Kant: Hegel / Feuerbach / Nietzsche)
+      const count = modal.choices.length;
+      const choiceCardW = 280;
+      const choiceCardH = 410;
+      const gap = 24;
+      const startX = modalX + (modalW - (count * choiceCardW + (count - 1) * gap)) / 2;
+      const choiceY = modalY + 145;
+
+      for (let i = 0; i < count; i++) {
+        const cId = modal.choices[i];
+        const cDef = BOOK_DEFINITIONS[cId];
+        const cx = startX + i * (choiceCardW + gap);
+
+        this.ctx.fillStyle = 'rgba(25, 30, 42, 0.94)';
+        this.ctx.fillRect(cx, choiceY, choiceCardW, choiceCardH);
+        this.ctx.strokeStyle = '#eab308';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(cx, choiceY, choiceCardW, choiceCardH);
+
+        // Bìa sách dọc
+        const bW = 138;
+        const bH = 192;
+        const bX = cx + Math.round((choiceCardW - bW) / 2);
+        this.bookSystem.renderBookCard(this.ctx, cId, bX, choiceY + 14, bW, bH, true);
+
+        // Tác giả & buffs
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(`✍️ ${cDef ? cDef.author : ''}`, cx + choiceCardW / 2, choiceY + 232);
+
+        this.ctx.fillStyle = '#fde047';
+        this.ctx.font = '13px "Segoe UI", sans-serif';
+        this.ctx.fillText(cDef ? (cDef.desc || cDef.buffDesc || '') : '', cx + choiceCardW / 2, choiceY + 258, choiceCardW - 24);
+
+        // Nút chọn
+        const selectBtnW = 210;
+        const selectBtnH = 44;
+        const selectBtnX = cx + choiceCardW / 2 - selectBtnW / 2;
+        const selectBtnY = choiceY + choiceCardH - 58;
+
+        this.ctx.fillStyle = '#15803d';
+        this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+        this.ctx.strokeStyle = '#4ade80';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+        this.ctx.fillText('⚡ CHỌN NHÁNH NÀY', selectBtnX + selectBtnW / 2, selectBtnY + 28);
+
+        this.evolutionChoiceBtns.push({ x: cx, y: choiceY, w: choiceCardW, h: choiceCardH, targetId: cId });
+      }
+
+      // Nút Tạm Dừng ở dưới cùng
+      const pauseW = 320;
+      const pauseH = 50;
+      const pauseX = this.canvas.width / 2 - pauseW / 2;
+      const pauseY = modalY + modalH - 72;
+
+      this.ctx.fillStyle = '#1e293b';
+      this.ctx.fillRect(pauseX, pauseY, pauseW, pauseH);
+      this.ctx.strokeStyle = '#60a5fa';
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(pauseX, pauseY, pauseW, pauseH);
+
+      this.ctx.fillStyle = '#93c5fd';
+      this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⏸️ TẠM DỪNG (TIẾN HÓA SAU)', pauseX + pauseW / 2, pauseY + 31);
+
+      this.evolutionModalPauseBtn = { x: pauseX, y: pauseY, w: pauseW, h: pauseH };
+    }
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // TOAST THÔNG BÁO NỔI BẬT TRONG TRẬN
+  // =========================================================================
+  renderGameToast() {
+    if (!this.gameToast) return;
+    this.ctx.save();
+    const alpha = Math.min(1.0, this.gameToast.timer * 2.5);
+    this.ctx.globalAlpha = alpha;
+
+    const tw = 760;
+    const th = 48;
+    const tx = (this.canvas.width - tw) / 2;
+    const ty = 25;
+
+    this.ctx.fillStyle = 'rgba(12, 10, 20, 0.95)';
+    this.ctx.fillRect(tx, ty, tw, th);
+    this.ctx.strokeStyle = this.gameToast.color;
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(tx, ty, tw, th);
+
+    this.ctx.fillStyle = this.gameToast.color;
+    this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(this.gameToast.text, tx + tw / 2, ty + 30);
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MÀN HÌNH CHỌN SÁCH KHỞI ĐẦU (BOOK SELECTION SCREEN)
+  // =========================================================================
+  renderBookSelect() {
+    this.ctx.save();
+    this.menuButtons = [];
+
+    // Nền tối huyền bí thư viện cổ
+    this.ctx.fillStyle = '#080b12';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const maxStarters = (this.meta.upgrades.starterBooks ? (1 + this.meta.upgrades.starterBooks.level) : 1);
+    const isNoBooksChallenge = !!(this.selectedChallenges && this.selectedChallenges.no_books);
+
+    // Tiêu đề
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 46px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('CHỌN TÁC PHẨM KHỞI ĐẦU', this.canvas.width / 2, 68);
+
+    if (isNoBooksChallenge) {
+      this.ctx.fillStyle = '#ef4444';
+      this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      this.ctx.fillText('🚫 THỬ THÁCH "CẤM DÙNG SÁCH" ĐANG ĐƯỢC BẬT - Bạn không thể mang theo hoặc nhặt sách trong trận đấu!', this.canvas.width / 2, 108);
+    } else {
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = '17px "Segoe UI", sans-serif';
+      const chosenCount = this.selectedStarterBookIds.length;
+      this.ctx.fillText(
+        `Bạn có thể mang tối đa ${maxStarters} cuốn sách trước trận (${chosenCount}/${maxStarters} đã chọn):`,
+        this.canvas.width / 2,
+        108
+      );
+    }
+
+    // Grid 8 sách khởi đầu: 2 hàng 4 cột với THẺ SÁCH DỌC (PORTRAIT)
+    const cardBoxW = 390;
+    const cardBoxH = 370;
+    const gapX = 28;
+    const gapY = 16;
+    const totalGridW = 4 * cardBoxW + 3 * gapX;
+    const startX = (this.canvas.width - totalGridW) / 2;
+    const baseGridY = 145;
+
+    for (let i = 0; i < STARTER_BOOK_IDS.length; i++) {
+      const bId = STARTER_BOOK_IDS[i];
+      const def = BOOK_DEFINITIONS[bId];
+      const col = i % 4;
+      const row = Math.floor(i / 4);
+
+      const bx = startX + col * (cardBoxW + gapX);
+      const by = baseGridY + row * (cardBoxH + gapY);
+      const isSelected = !isNoBooksChallenge && this.selectedStarterBookIds.includes(bId);
+
+      this.ctx.fillStyle = isSelected ? 'rgba(35, 45, 65, 0.96)' : (isNoBooksChallenge ? 'rgba(12, 14, 20, 0.6)' : 'rgba(16, 22, 34, 0.9)');
+      this.ctx.fillRect(bx, by, cardBoxW, cardBoxH);
+      this.ctx.strokeStyle = isSelected ? '#ffd700' : (isNoBooksChallenge ? '#1e293b' : '#334155');
+      this.ctx.lineWidth = isSelected ? 3 : 1.5;
+      this.ctx.strokeRect(bx, by, cardBoxW, cardBoxH);
+
+      // Thẻ sách dọc Canvas tỷ lệ 1 : 1.4 chuẩn bìa sách thật ngoài đời
+      const cardW = 144;
+      const cardH = 202;
+      const cardX = bx + (cardBoxW - cardW) / 2;
+      const cardY = by + 14;
+
+      this.ctx.save();
+      if (isNoBooksChallenge) this.ctx.globalAlpha = 0.45;
+      this.bookSystem.renderBookCard(this.ctx, bId, cardX, cardY, cardW, cardH, isSelected);
+      this.ctx.restore();
+
+      // Tác giả & buffs
+      this.ctx.fillStyle = isNoBooksChallenge ? '#64748b' : '#ffffff';
+      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(`✍️ ${def ? def.author : ''}`, bx + cardBoxW / 2, by + 236);
+
+      this.ctx.fillStyle = isNoBooksChallenge ? '#475569' : '#fde047';
+      this.ctx.font = '13px "Segoe UI", sans-serif';
+      const buffText = def ? (def.desc || def.buffDesc || '') : '';
+      this.ctx.fillText(buffText, bx + cardBoxW / 2, by + 260, cardBoxW - 24);
+
+      // Điều kiện tiến hóa bí ẩn
+      this.ctx.fillStyle = isNoBooksChallenge ? '#334155' : '#94a3b8';
+      this.ctx.font = 'italic 12px "Segoe UI", sans-serif';
+      this.ctx.fillText('🔒 Tiến Cấp: ??? (Điều kiện bí ẩn)', bx + cardBoxW / 2, by + 285);
+
+      // Nút Lựa Chọn
+      const selectBtnW = 200;
+      const selectBtnH = 40;
+      const selectBtnX = bx + (cardBoxW - selectBtnW) / 2;
+      const selectBtnY = by + 312;
+
+      this.ctx.fillStyle = isNoBooksChallenge ? '#1e293b' : (isSelected ? '#15803d' : '#1e293b');
+      this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+      this.ctx.strokeStyle = isNoBooksChallenge ? '#334155' : (isSelected ? '#4ade80' : '#475569');
+      this.ctx.lineWidth = 1.8;
+      this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
+
+      this.ctx.fillStyle = isNoBooksChallenge ? '#64748b' : (isSelected ? '#ffffff' : '#cbd5e1');
+      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.fillText(isNoBooksChallenge ? '🚫 CẤM DÙNG' : (isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN SÁCH'), selectBtnX + selectBtnW / 2, selectBtnY + 25);
+
+      if (!isNoBooksChallenge) {
+        this.menuButtons.push({ x: bx, y: by, w: cardBoxW, h: cardBoxH, id: 'toggle_starter_book_' + bId });
+      }
+    }
+
+    // Các Nút Hành Động Ở Dưới Cùng (Quay Lại / Vào Trận)
+    const btnH = 56;
+    const btnY = this.canvas.height - 95;
+
+    // Nút Quay Lại
+    const backW = 260;
+    const backX = this.canvas.width / 2 - 320;
+    this.ctx.fillStyle = '#334155';
+    this.ctx.fillRect(backX, btnY, backW, btnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(backX, btnY, backW, btnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 19px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⬅ QUAY LẠI', backX + backW / 2, btnY + 35);
+    this.menuButtons.push({ x: backX, y: btnY, w: backW, h: btnH, id: 'back_to_diff_select' });
+
+    // Nút Vào Trận
+    const startW = 340;
+    const startXBtn = this.canvas.width / 2 + 20;
+    this.ctx.fillStyle = '#b91c1c';
+    this.ctx.fillRect(startXBtn, btnY, startW, btnH);
+    this.ctx.strokeStyle = '#ef4444';
+    this.ctx.lineWidth = 2.5;
+    this.ctx.strokeRect(startXBtn, btnY, startW, btnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 21px "Segoe UI", sans-serif';
+    this.ctx.fillText('🔥 VÀO TRẬN ĐẤU 🔥', startXBtn + startW / 2, btnY + 36);
+    this.menuButtons.push({ x: startXBtn, y: btnY, w: startW, h: btnH, id: 'start_battle_from_books' });
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MÀN HÌNH THƯ VIỆN ĐẠI TÁC PHẨM (BOOK CODEX)
+  // =========================================================================
+  renderCodex() {
+    this.ctx.save();
+    this.menuButtons = [];
+
+    // Nền thư viện cổ điển hoàng gia
+    this.ctx.fillStyle = '#06080e';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const allBookIds = Object.keys(BOOK_DEFINITIONS);
+    const unlockedCount = allBookIds.filter(id => this.bookSystem.unlockedCodex.has(id)).length;
+
+    // Tiêu đề
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 44px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('📖 THƯ VIỆN TÁC PHẨM', this.canvas.width / 2, 68);
+
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '16px "Segoe UI", sans-serif';
+    this.ctx.fillText(`Tổng hợp 35 Tác Phẩm. Đã khám phá: ${unlockedCount}/35 Sách`, this.canvas.width / 2, 102);
+
+    // Các Tab Lọc Thư Viện: Tất Cả (35) | Khởi Đầu (8) | Tiến Hóa (15) | Hợp Thể Ẩn (12)
+    const tabs = [
+      { id: 'all', label: 'TẤT CẢ (35)' },
+      { id: 'starter', label: 'KHỞI ĐẦU (8)' },
+      { id: 'evolved', label: 'TIẾN HÓA (15)' },
+      { id: 'fusion', label: 'HỢP THỂ ẨN (12)' }
+    ];
+
+    const tabW = 200;
+    const tabH = 40;
+    const tabGap = 16;
+    const totalTabW = tabs.length * tabW + (tabs.length - 1) * tabGap;
+    const tabStartX = this.canvas.width / 2 - totalTabW / 2;
+    const tabY = 130;
+
+    for (let i = 0; i < tabs.length; i++) {
+      const tab = tabs[i];
+      const tx = tabStartX + i * (tabW + tabGap);
+      const isAct = this.codexFilter === tab.id;
+
+      this.ctx.fillStyle = isAct ? '#854d0e' : '#1e293b';
+      this.ctx.fillRect(tx, tabY, tabW, tabH);
+      this.ctx.strokeStyle = isAct ? '#ffd700' : '#475569';
+      this.ctx.lineWidth = isAct ? 2 : 1;
+      this.ctx.strokeRect(tx, tabY, tabW, tabH);
+
+      this.ctx.fillStyle = isAct ? '#fef08a' : '#cbd5e1';
+      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(tab.label, tx + tabW / 2, tabY + 25);
+
+      this.menuButtons.push({ x: tx, y: tabY, w: tabW, h: tabH, id: 'filter_codex_' + tab.id });
+    }
+
+    // Lọc danh sách sách theo tab
+    let displayIds = allBookIds;
+    if (this.codexFilter === 'starter') {
+      displayIds = STARTER_BOOK_IDS;
+    } else if (this.codexFilter === 'evolved') {
+      displayIds = allBookIds.filter(id => !STARTER_BOOK_IDS.includes(id) && !BOOK_DEFINITIONS[id].fusionIngredients && id !== 'camus' && id !== 'adam_smith' && id !== 'sartre');
+    } else if (this.codexFilter === 'fusion') {
+      displayIds = allBookIds.filter(id => BOOK_DEFINITIONS[id].fusionIngredients || id === 'camus' || id === 'adam_smith' || id === 'sartre');
+    }
+
+    // Vùng cuộn sách (Grid 4 cột)
+    const clipX = 60;
+    const clipY = 190;
+    const clipW = this.canvas.width - 120;
+    const clipH = 715;
+
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(clipX, clipY, clipW, clipH);
+    this.ctx.clip();
+
+    const cardW = 410;
+    const cardH = 220;
+    const gapX = 20;
+    const gapY = 20;
+    const cols = 4;
+    const startX = clipX + (clipW - (cols * cardW + (cols - 1) * gapX)) / 2;
+
+    for (let i = 0; i < displayIds.length; i++) {
+      const bId = displayIds[i];
+      const def = BOOK_DEFINITIONS[bId];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+
+      const cx = startX + col * (cardW + gapX);
+      const cy = clipY + 10 + row * (cardH + gapY) - this.codexScrollY;
+
+      if (cy + cardH < clipY || cy > clipY + clipH) continue; // Culling ngoài màn hình
+
+      const isUnlocked = this.bookSystem.unlockedCodex.has(bId);
+
+      if (isUnlocked) {
+        this.ctx.fillStyle = 'rgba(22, 28, 42, 0.94)';
+        this.ctx.fillRect(cx, cy, cardW, cardH);
+        this.ctx.strokeStyle = '#d4af37';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(cx, cy, cardW, cardH);
+
+        // Bìa sách bên trái (Khổ dọc portrait)
+        this.bookSystem.renderBookCard(this.ctx, bId, cx + 14, cy + 15, 138, 190, false);
+
+        // Thông tin bên phải
+        const textX = cx + 168;
+        const maxTextW = cardW - 180;
+
+        // Tên tác phẩm
+        this.ctx.fillStyle = '#ffd166';
+        this.ctx.font = 'bold 16px "Playfair Display", Georgia, "Times New Roman", serif';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(def.work, textX, cy + 32, maxTextW);
+
+        // Tác giả
+        this.ctx.fillStyle = '#cbd5e1';
+        this.ctx.font = 'italic 13px "Segoe UI", sans-serif';
+        this.ctx.fillText(`✍️ Tác giả: ${def.author}`, textX, cy + 56, maxTextW);
+
+        // Kẻ viền ngăn cách tinh tế
+        this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.2)';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(textX, cy + 68);
+        this.ctx.lineTo(cx + cardW - 16, cy + 68);
+        this.ctx.stroke();
+
+        // Chỉ số buff (Wrap từng dòng rõ ràng, không truyền maxWidth vào fillText gây nén dẹt chữ)
+        this.ctx.fillStyle = '#4ade80';
+        this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
+        const buffWords = (def.desc || def.buffDesc || '').split(' ');
+        let bLine = '✨ ';
+        let bY = cy + 90;
+        let lineCount = 0;
+        for (const w of buffWords) {
+          const test = bLine + w + ' ';
+          if (this.ctx.measureText(test).width > maxTextW) {
+            this.ctx.fillText(bLine, textX, bY);
+            bLine = w + ' ';
+            bY += 16;
+            lineCount++;
+            if (lineCount >= 3) break;
+          } else {
+            bLine = test;
+          }
+        }
+        if (lineCount < 3 && bLine.trim()) {
+          this.ctx.fillText(bLine, textX, bY);
+          bY += 16;
+        }
+
+        // Điều kiện tiến hóa / Gợi ý bấm xem chi tiết
+        this.ctx.fillStyle = '#38bdf8';
+        this.ctx.font = '11.5px "Segoe UI", sans-serif';
+        const condText = def.evolutionDesc ? `🔑 ${def.evolutionDesc}` : (def.fusionIngredients ? '🔮 Hợp thể thần thoại' : '🔑 Sách khởi đầu');
+        if (this.ctx.measureText(condText).width > maxTextW) {
+          this.ctx.fillText(condText.substring(0, 32) + '...', textX, cy + 158);
+        } else {
+          this.ctx.fillText(condText, textX, cy + 158);
+        }
+
+        this.ctx.fillStyle = '#fde047';
+        this.ctx.font = 'italic 11.5px "Segoe UI", sans-serif';
+        this.ctx.fillText('🔍 Nhấp thẻ để xem chi tiết', textX, cy + 182);
+
+        // Đẩy hitbox click xem chi tiết
+        this.menuButtons.push({ x: cx, y: cy, w: cardW, h: cardH, id: 'codex_inspect_' + bId });
+      } else {
+        // Thẻ đang khóa
+        this.ctx.fillStyle = 'rgba(12, 16, 26, 0.9)';
+        this.ctx.fillRect(cx, cy, cardW, cardH);
+        this.ctx.strokeStyle = '#1e293b';
+        this.ctx.lineWidth = 1.2;
+        this.ctx.strokeRect(cx, cy, cardW, cardH);
+
+        // Khung sách da bóng silhouette cổ điển
+        const bookX = cx + 14;
+        const bookY = cy + 15;
+        const bookW = 138;
+        const bookH = 190;
+        const bookGrad = this.ctx.createLinearGradient(bookX, bookY, bookX + bookW, bookY + bookH);
+        bookGrad.addColorStop(0, '#1e293b');
+        bookGrad.addColorStop(1, '#0f172a');
+        this.ctx.fillStyle = bookGrad;
+        this.ctx.fillRect(bookX, bookY, bookW, bookH);
+
+        // Gáy sách cổ điển
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        this.ctx.fillRect(bookX, bookY, 6, bookH);
+
+        // Khung viền chỉ vàng mờ bên trong bìa
+        this.ctx.strokeStyle = 'rgba(212, 175, 55, 0.35)';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(bookX + 8, bookY + 8, bookW - 16, bookH - 16);
+
+        // Ổ khóa vàng nổi bật
+        this.ctx.fillStyle = '#fbbf24';
+        this.ctx.font = '32px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('🔒', bookX + bookW / 2, bookY + bookH / 2 - 4);
+
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = 'bold 11px "Segoe UI", sans-serif';
+        this.ctx.fillText('CHƯA KHÁM PHÁ', bookX + bookW / 2, bookY + bookH / 2 + 30);
+
+        // Chữ bên phải với typography thanh lịch
+        const textX = cx + 168;
+        const maxTextW = cardW - 180;
+
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = 'bold 16px "Playfair Display", Georgia, "Times New Roman", serif';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText('???', textX, cy + 34);
+
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = '13px "Segoe UI", sans-serif';
+        this.ctx.fillText('Tác giả: Ẩn Danh', textX, cy + 58);
+
+        // Kẻ viền ngăn cách tinh tế
+        this.ctx.strokeStyle = 'rgba(71, 85, 105, 0.3)';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(textX, cy + 70);
+        this.ctx.lineTo(cx + cardW - 16, cy + 70);
+        this.ctx.stroke();
+
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = '12px "Segoe UI", sans-serif';
+        this.ctx.fillText('• Thu thập sách trong trận để mở khóa', textX, cy + 96, maxTextW);
+
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = 'italic 12px "Segoe UI", sans-serif';
+        this.ctx.fillText('• Điều kiện tiến cấp: Bí ẩn', textX, cy + 128, maxTextW);
+      }
+    }
+
+    this.ctx.restore();
+
+    // Thanh điều khiển Cuộn Lên / Xuống & Nút Quay Về
+    const scrollBtnW = 160;
+    const scrollBtnH = 46;
+    const scrollBtnY = this.canvas.height - 90;
+
+    // Nút Cuộn Lên
+    const upBtnX = this.canvas.width / 2 - 280;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('▲ CUỘN LÊN', upBtnX + scrollBtnW / 2, scrollBtnY + 28);
+    this.menuButtons.push({ x: upBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_up' });
+
+    // Nút Cuộn Xuống
+    const downBtnX = this.canvas.width / 2 + 120;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.fillText('▼ CUỘN XUỐNG', downBtnX + scrollBtnW / 2, scrollBtnY + 28);
+    this.menuButtons.push({ x: downBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_down' });
+
+    // Nút Quay Về Menu Chính
+    const backBtnW = 300;
+    const backBtnH = 52;
+    const backBtnX = 60;
+    const backBtnY = this.canvas.height - 90;
+
+    this.ctx.fillStyle = '#334155';
+    this.ctx.fillRect(backBtnX, backBtnY, backBtnW, backBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(backBtnX, backBtnY, backBtnW, backBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 18px sans-serif';
+    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', backBtnX + backBtnW / 2, backBtnY + 33);
+    this.menuButtons.push({ x: backBtnX, y: backBtnY, w: backBtnW, h: backBtnH, id: 'back_to_menu' });
+
+    // Modal Xem Chi Tiết Tác Phẩm nếu người chơi đã nhấp vào một cuốn sách đã mở khóa
+    if (this.selectedCodexBook) {
+      this.renderCodexDetailModal(this.selectedCodexBook);
+    }
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // MODAL CHI TIẾT TÁC PHẨM TRONG THƯ VIỆN CODEX
+  // =========================================================================
+  renderCodexDetailModal(bId) {
+    const def = BOOK_DEFINITIONS[bId];
+    if (!def) return;
+
+    this.ctx.save();
+
+    // Nền mờ bao phủ
+    this.ctx.fillStyle = 'rgba(5, 7, 14, 0.90)';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const modalW = 1040;
+    const modalH = 650;
+    const modalX = Math.round((this.canvas.width - modalW) / 2);
+    const modalY = Math.round((this.canvas.height - modalH) / 2);
+    this.codexDetailBox = { x: modalX, y: modalY, w: modalW, h: modalH };
+
+    // Khung bảng hoàng gia viền vàng lấp lánh
+    this.ctx.fillStyle = 'rgba(16, 22, 34, 0.98)';
+    this.ctx.fillRect(modalX, modalY, modalW, modalH);
+    this.ctx.strokeStyle = '#ffd700';
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeRect(modalX, modalY, modalW, modalH);
+
+    // Bìa sách lớn bên trái (Khổ dọc portrait 1 : 1.4)
+    const coverW = 200;
+    const coverH = 280;
+    const coverX = modalX + 50;
+    const coverY = modalY + 65;
+    this.bookSystem.renderBookCard(this.ctx, bId, coverX, coverY, coverW, coverH, true);
+
+    // Nhãn Trạng Thái dưới bìa sách
+    this.ctx.fillStyle = '#4ade80';
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('✨ ĐÃ KHÁM PHÁ ✨', coverX + coverW / 2, coverY + coverH + 34);
+
+    // Khu vực thông tin bên phải
+    const infoX = coverX + coverW + 45;
+    const maxInfoW = modalW - (coverW + 145);
+
+    // 1. Tên tác phẩm ngôn ngữ gốc
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 30px "Playfair Display", Georgia, "Times New Roman", serif';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText(def.work, infoX, modalY + 75, maxInfoW);
+
+    // 2. Tác giả & Bậc tác phẩm
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'italic 18px "Segoe UI", sans-serif';
+    this.ctx.fillText(`✍️ Tác giả: ${def.author}`, infoX, modalY + 110);
+
+    let tierLabel = '📘 Bậc: Tác Phẩm Khởi Đầu';
+    let tierColor = '#38bdf8';
+    if (def.fusionIngredients || bId === 'camus' || bId === 'adam_smith' || bId === 'sartre') {
+      tierLabel = '🔮 Bậc: Tác Phẩm Hợp Thể / Thần Thoại Ẩn';
+      tierColor = '#f59e0b';
+    } else if (!STARTER_BOOK_IDS.includes(bId)) {
+      tierLabel = '📙 Bậc: Tác Phẩm Tiến Hóa Cổ Điển';
+      tierColor = '#c084fc';
+    }
+
+    this.ctx.fillStyle = tierColor;
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.fillText(tierLabel, infoX, modalY + 138);
+
+    // Đường kẻ phân cách vàng kim
+    this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.beginPath();
+    this.ctx.moveTo(infoX, modalY + 154);
+    this.ctx.lineTo(modalX + modalW - 50, modalY + 154);
+    this.ctx.stroke();
+
+    // 3. Hiệu lực & Chỉ số Buff
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    this.ctx.fillText('📖 HIỆU LỰC & CHỈ SỐ BUFF:', infoX, modalY + 185);
+
+    this.ctx.fillStyle = '#4ade80';
+    this.ctx.font = '15px "Segoe UI", sans-serif';
+    const descWords = (def.desc || def.buffDesc || '').split(' ');
+    let line = '✨ ';
+    let curY = modalY + 215;
+    for (const w of descWords) {
+      const test = line + w + ' ';
+      if (this.ctx.measureText(test).width > maxInfoW) {
+        this.ctx.fillText(line, infoX, curY);
+        line = w + ' ';
+        curY += 25;
+      } else {
+        line = test;
+      }
+    }
+    if (line.trim()) {
+      this.ctx.fillText(line, infoX, curY);
+      curY += 25;
+    }
+
+    // 4. Cơ chế tiến cấp hoặc nguồn gốc hợp thể
+    curY += 15;
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    this.ctx.fillText('🔮 NGUỒN GỐC & CƠ CHẾ TIẾN CẤP:', infoX, curY);
+    curY += 30;
+
+    let originText = '';
+    if (def.fusionIngredients && def.fusionIngredients.length > 0) {
+      const ingNames = def.fusionIngredients.map(id => {
+        const b = BOOK_DEFINITIONS[id];
+        return b ? `${b.work} (${b.author})` : id;
+      }).join('  +  ');
+      originText = `Hợp thể bí truyền từ: ${ingNames}.`;
+    } else if (def.evolutionDesc) {
+      originText = `Điều kiện tiến cấp: ${def.evolutionDesc}.`;
+    } else if (STARTER_BOOK_IDS.includes(bId)) {
+      originText = 'Tác phẩm bậc khởi đầu (Có thể chọn mang theo trước trận hoặc nhặt được khi tiêu diệt quái).';
+    } else {
+      originText = 'Thức tỉnh theo điều kiện bí ẩn trong trận chiến.';
+    }
+
+    this.ctx.fillStyle = '#38bdf8';
+    this.ctx.font = '14px "Segoe UI", sans-serif';
+    const origWords = originText.split(' ');
+    let oLine = '🔑 ';
+    for (const w of origWords) {
+      const test = oLine + w + ' ';
+      if (this.ctx.measureText(test).width > maxInfoW) {
+        this.ctx.fillText(oLine, infoX, curY);
+        oLine = w + ' ';
+        curY += 22;
+      } else {
+        oLine = test;
+      }
+    }
+    if (oLine.trim()) {
+      this.ctx.fillText(oLine, infoX, curY);
+    }
+
+    // Nút Đóng Modal
+    const closeBtnW = 200;
+    const closeBtnH = 50;
+    const closeBtnX = modalX + modalW / 2 - closeBtnW / 2;
+    const closeBtnY = modalY + modalH - 75;
+
+    this.ctx.fillStyle = '#7f1d1d';
+    this.ctx.fillRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
+    this.ctx.strokeStyle = '#f87171';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('✖ ĐÓNG (ESC)', closeBtnX + closeBtnW / 2, closeBtnY + 31);
+
+    this.codexDetailCloseBtn = { x: closeBtnX, y: closeBtnY, w: closeBtnW, h: closeBtnH };
     this.ctx.restore();
   }
 }
