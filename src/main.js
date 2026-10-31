@@ -114,12 +114,13 @@ class Game {
     // Bắt đầu từ Menu Chính
     // this.initGame();
 
-    // Thông báo trạng thái trên màn hình Cây Kỹ Năng (Toast notification)
+    // Thông báo trạng thái trên màn hình Cây Kỹ Năng & Cổ Viện Shop (Toast notification)
     this.skillTreeToast = null;
+    this.shopToast = null;
 
     // Lắng nghe sự kiện
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
-    this.canvas.addEventListener('click', (e) => this.onCanvasClick(e));
+    this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
 
     // Vòng lặp chính
@@ -525,16 +526,39 @@ class Game {
     }
   }
 
+  // Tính toán tọa độ chuột trên canvas chuẩn xác 100%, khử hoàn toàn lệch do letterbox/aspect-ratio
+  getCanvasMousePos(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const canvasAspect = this.canvas.width / this.canvas.height; // 1920 / 1080 = 16:9
+    const elemAspect = rect.width / rect.height;
+
+    let drawW = rect.width;
+    let drawH = rect.height;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (elemAspect > canvasAspect) {
+      // Màn hình rộng hơn 16:9 (vệt đen 2 bên trái/phải)
+      drawW = rect.height * canvasAspect;
+      offsetX = (rect.width - drawW) / 2;
+    } else {
+      // Màn hình cao hơn 16:9 (vệt đen trên/dưới)
+      drawH = rect.width / canvasAspect;
+      offsetY = (rect.height - drawH) / 2;
+    }
+
+    const mouseX = ((e.clientX - rect.left - offsetX) / drawW) * this.canvas.width;
+    const mouseY = ((e.clientY - rect.top - offsetY) / drawH) * this.canvas.height;
+
+    return { mouseX, mouseY };
+  }
+
   onMouseMove(e) {
     if (this.gameState === 'PLAYING') {
       this.canvas.style.cursor = 'default';
       return;
     }
-    const rect = this.canvas.getBoundingClientRect();
-    const scaleX = this.canvas.width / rect.width;
-    const scaleY = this.canvas.height / rect.height;
-    const mouseX = (e.clientX - rect.left) * scaleX;
-    const mouseY = (e.clientY - rect.top) * scaleY;
+    const { mouseX, mouseY } = this.getCanvasMousePos(e);
 
     let hovering = false;
     for (const btn of this.menuButtons) {
@@ -553,14 +577,15 @@ class Game {
     this.skillTreeToast = { text, color, timer: 3.0 };
   }
 
-  onCanvasClick(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const scaleX = this.canvas.width / rect.width;
-    const scaleY = this.canvas.height / rect.height;
-    const mouseX = (e.clientX - rect.left) * scaleX;
-    const mouseY = (e.clientY - rect.top) * scaleY;
+  showShopToast(text, color = '#22c55e') {
+    this.shopToast = { text, color, timer: 3.0 };
+  }
 
-    // XỬ LÝ CLICK TRÊN CÁC MÀN HÌNH MENU (MAIN_MENU, CHAR_SELECT, DIFF_SELECT, SHOP, GAME_OVER)
+  onPointerDown(e) {
+    if (e.button !== 0) return; // Chỉ nhận chuột trái
+    const { mouseX, mouseY } = this.getCanvasMousePos(e);
+
+    // XỬ LÝ CLICK TRÊN CÁC MÀN HÌNH MENU (MAIN_MENU, CHAR_SELECT, DIFF_SELECT, SHOP, SKILL_TREE, GAME_OVER)
     if (this.gameState !== 'PLAYING') {
       for (const btn of this.menuButtons) {
         if (
@@ -690,17 +715,31 @@ class Game {
       this.showSkillTreeToast('🎁 Đã nhận +10,000 Score thử nghiệm thành công!', '#eab308');
     } else if (actionId.startsWith('allocate_skill_')) {
       const skillKey = actionId.replace('allocate_skill_', '');
-      const ok = this.masterySystem.allocateSkill(this.skillTreeSelectedCharId, skillKey);
-      if (ok) {
-        const def = SKILL_TREE_DEFINITIONS[skillKey];
-        this.showSkillTreeToast(`✨ Đã nâng cấp: ${def ? def.name : skillKey}!`, '#c084fc');
+      const char = this.masterySystem.getCharData(this.skillTreeSelectedCharId);
+      const def = SKILL_TREE_DEFINITIONS[skillKey];
+      const cur = (char.skills && char.skills[skillKey]) || 0;
+      if (cur >= (def ? def.maxLevel : 10)) {
+        this.showSkillTreeToast(`⭐ ${def ? def.name : skillKey} đã đạt cấp tối đa (10/10)!`, '#f59e0b');
+      } else if (char.skillPoints <= 0) {
+        this.showSkillTreeToast('⚠️ Chưa có Điểm Kỹ Năng! Hãy Nâng Cấp Thông Thạo trước (hoặc bấm +10K Score).', '#f43f5e');
+      } else {
+        const ok = this.masterySystem.allocateSkill(this.skillTreeSelectedCharId, skillKey);
+        if (ok) {
+          this.showSkillTreeToast(`✨ Đã nâng cấp: ${def ? def.name : skillKey}!`, '#c084fc');
+        }
       }
     } else if (actionId.startsWith('refund_skill_')) {
       const skillKey = actionId.replace('refund_skill_', '');
-      const ok = this.masterySystem.refundSkill(this.skillTreeSelectedCharId, skillKey);
-      if (ok) {
-        const def = SKILL_TREE_DEFINITIONS[skillKey];
-        this.showSkillTreeToast(`↩️ Đã hoàn lại 1 điểm từ: ${def ? def.name : skillKey}!`, '#fb923c');
+      const char = this.masterySystem.getCharData(this.skillTreeSelectedCharId);
+      const def = SKILL_TREE_DEFINITIONS[skillKey];
+      const cur = (char.skills && char.skills[skillKey]) || 0;
+      if (cur <= 0) {
+        this.showSkillTreeToast(`ℹ️ ${def ? def.name : skillKey} chưa được cộng điểm nào để hoàn!`, '#f59e0b');
+      } else {
+        const ok = this.masterySystem.refundSkill(this.skillTreeSelectedCharId, skillKey);
+        if (ok) {
+          this.showSkillTreeToast(`↩️ Đã hoàn lại 1 điểm từ: ${def ? def.name : skillKey}!`, '#fb923c');
+        }
       }
     } else if (actionId === 'reset_mastery_skills') {
       const refunded = this.masterySystem.resetSkills(this.skillTreeSelectedCharId);
@@ -745,9 +784,27 @@ class Game {
       this.gameState = 'MODE_SELECT';
     } else if (actionId === 'back_to_challenge_select') {
       this.gameState = 'CHALLENGE_SELECT';
+    } else if (actionId === 'add_test_gold') {
+      this.meta.gold = (this.meta.gold || 0) + 1000;
+      this.meta.save();
+      this.showShopToast('🎁 Đã nhận +1,000 Tiền Vàng thử nghiệm!', '#ffd700');
     } else if (actionId.startsWith('buy_upgrade_')) {
       const upId = actionId.replace('buy_upgrade_', '');
-      this.meta.buyUpgrade(upId);
+      const up = this.meta.upgrades[upId];
+      if (!up) return;
+      if (up.level >= up.maxLevel) {
+        this.showShopToast(`⭐ ${up.name} đã đạt cấp tối đa!`, '#f59e0b');
+        return;
+      }
+      const cost = this.meta.getCost(upId);
+      if (this.meta.gold < cost) {
+        this.showShopToast(`⚠️ Chưa đủ Tiền Vàng! Cần ${cost.toLocaleString()} Vàng (Hiện có: ${this.meta.gold.toLocaleString()} Vàng).`, '#f43f5e');
+        return;
+      }
+      const ok = this.meta.buyUpgrade(upId);
+      if (ok) {
+        this.showShopToast(`🎉 Đã nâng cấp thành công: ${up.name} (Cấp ${up.level}/${up.maxLevel})!`, '#4ade80');
+      }
     }
   }
 
@@ -775,6 +832,13 @@ class Game {
         this.skillTreeToast.timer -= delta;
         if (this.skillTreeToast.timer <= 0) {
           this.skillTreeToast = null;
+        }
+      }
+
+      if (this.shopToast && this.shopToast.timer > 0) {
+        this.shopToast.timer -= delta;
+        if (this.shopToast.timer <= 0) {
+          this.shopToast = null;
         }
       }
     }
@@ -2545,18 +2609,35 @@ class Game {
     this.ctx.fillStyle = '#ffd166';
     this.ctx.font = 'bold 56px "Segoe UI", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('CỔ VIỆN MA PHÁP (NÂNG CẤP VĨNH VIỄN)', this.canvas.width / 2, 100);
+    this.ctx.fillText('CỔ VIỆN MA PHÁP (NÂNG CẤP VĨNH VIỄN)', this.canvas.width / 2, 85);
 
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.font = 'bold 28px monospace';
-    this.ctx.fillText(`🪙 Tiền Vàng Hiện Có: ${this.meta.gold}`, this.canvas.width / 2, 150);
+    this.ctx.font = 'bold 26px monospace';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText(`🪙 Tiền Vàng Hiện Có: ${this.meta.gold.toLocaleString()} Vàng`, this.canvas.width / 2 + 60, 136);
+
+    // Nút Nhận Vàng Test
+    const testGoldBtnW = 200;
+    const testGoldBtnH = 38;
+    const testGoldBtnX = this.canvas.width / 2 + 80;
+    const testGoldBtnY = 110;
+    this.ctx.fillStyle = '#4c1d95';
+    this.ctx.fillRect(testGoldBtnX, testGoldBtnY, testGoldBtnW, testGoldBtnH);
+    this.ctx.strokeStyle = '#a855f7';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(testGoldBtnX, testGoldBtnY, testGoldBtnW, testGoldBtnH);
+    this.ctx.fillStyle = '#fde047';
+    this.ctx.font = 'bold 14px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🎁 +1,000 VÀNG TEST', testGoldBtnX + testGoldBtnW / 2, testGoldBtnY + 24);
+    this.menuButtons.push({ x: testGoldBtnX, y: testGoldBtnY, w: testGoldBtnW, h: testGoldBtnH, id: 'add_test_gold' });
 
     // Danh sách 6 nâng cấp
     const upgrades = Object.values(this.meta.upgrades);
     const itemW = 920;
     const itemH = 90;
     const startX = this.canvas.width / 2 - itemW / 2;
-    let startY = 185;
+    let startY = 175;
 
     for (const up of upgrades) {
       const isMax = up.level >= up.maxLevel;
@@ -2609,9 +2690,9 @@ class Game {
       if (isMax) {
         this.ctx.fillText('ĐÃ MAX', buyBtnX + buyBtnW / 2, buyBtnY + 31);
       } else {
-        this.ctx.fillText(`🪙 ${cost}`, buyBtnX + buyBtnW / 2, buyBtnY + 31);
-        this.menuButtons.push({ x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH, id: 'buy_upgrade_' + up.id });
+        this.ctx.fillText(`🪙 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 31);
       }
+      this.menuButtons.push({ x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH, id: 'buy_upgrade_' + up.id });
 
       startY += itemH + 16;
     }
@@ -2620,7 +2701,7 @@ class Game {
     const backBtnW = 320;
     const backBtnH = 58;
     const backBtnX = this.canvas.width / 2 - backBtnW / 2;
-    const backBtnY = this.canvas.height - 120;
+    const backBtnY = this.canvas.height - 110;
 
     this.ctx.fillStyle = '#1e293b';
     this.ctx.fillRect(backBtnX, backBtnY, backBtnW, backBtnH);
@@ -2632,6 +2713,29 @@ class Game {
     this.ctx.textAlign = 'center';
     this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', backBtnX + backBtnW / 2, backBtnY + 36);
     this.menuButtons.push({ x: backBtnX, y: backBtnY, w: backBtnW, h: backBtnH, id: 'back_to_menu' });
+
+    // Toast Notification trong Cổ Viện Shop
+    if (this.shopToast && this.shopToast.timer > 0) {
+      this.ctx.save();
+      const toastAlpha = Math.min(1.0, this.shopToast.timer * 2.5);
+      this.ctx.globalAlpha = toastAlpha;
+      const tw = 720;
+      const th = 46;
+      const tx = (this.canvas.width - tw) / 2;
+      const ty = 22;
+
+      this.ctx.fillStyle = 'rgba(12, 9, 26, 0.96)';
+      this.ctx.fillRect(tx, ty, tw, th);
+      this.ctx.strokeStyle = this.shopToast.color;
+      this.ctx.lineWidth = 2.5;
+      this.ctx.strokeRect(tx, ty, tw, th);
+
+      this.ctx.fillStyle = this.shopToast.color;
+      this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(this.shopToast.text, tx + tw / 2, ty + 29);
+      this.ctx.restore();
+    }
 
     this.ctx.restore();
   }
@@ -3040,6 +3144,7 @@ class Game {
           this.ctx.font = 'bold 13px sans-serif';
           this.ctx.textAlign = 'center';
           this.ctx.fillText('ĐÃ MAX', maxBoxX + maxBoxW / 2, refBtnY + 29);
+          this.menuButtons.push({ x: maxBoxX, y: refBtnY, w: maxBoxW, h: refBtnH, id: 'allocate_skill_' + skillKey });
         } else if (canRefundPoint) {
           // Có điểm (> 0): Hiện cả 2 nút [-] và [+]
           const refBtnW = 44;
@@ -3068,10 +3173,7 @@ class Game {
           this.ctx.font = 'bold 13px sans-serif';
           this.ctx.textAlign = 'center';
           this.ctx.fillText('[+] NÂNG', addBtnX + addBtnW / 2, refBtnY + 29);
-
-          if (canAddPoint) {
-            this.menuButtons.push({ x: addBtnX, y: refBtnY, w: addBtnW, h: refBtnH, id: 'allocate_skill_' + skillKey });
-          }
+          this.menuButtons.push({ x: addBtnX, y: refBtnY, w: addBtnW, h: refBtnH, id: 'allocate_skill_' + skillKey });
         } else {
           // Chưa có điểm (cấp 0): Chỉ hiện nút [+] NÂNG
           const addBtnW = 110;
@@ -3087,10 +3189,7 @@ class Game {
           this.ctx.font = 'bold 14px sans-serif';
           this.ctx.textAlign = 'center';
           this.ctx.fillText('[+] NÂNG', addBtnX + addBtnW / 2, addBtnY + 29);
-
-          if (canAddPoint) {
-            this.menuButtons.push({ x: addBtnX, y: addBtnY, w: addBtnW, h: addBtnH, id: 'allocate_skill_' + skillKey });
-          }
+          this.menuButtons.push({ x: addBtnX, y: addBtnY, w: addBtnW, h: addBtnH, id: 'allocate_skill_' + skillKey });
         }
       }
     }

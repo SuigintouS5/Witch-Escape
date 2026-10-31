@@ -1212,7 +1212,9 @@ export class WeaponManager {
   }
 
   update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
-    const cdRate = player && player.isWitch ? 1.20 : 1.0;
+    const witchRate = player && player.isWitch ? 1.20 : 1.0;
+    const cdReduction = Math.min(0.60, (player && player.cooldownReduction) ? player.cooldownReduction : 0);
+    const cdRate = witchRate / (1.0 - cdReduction);
     for (const weapon of this.equippedWeapons) {
       if (weapon.isLocked) continue; // Đang bị khóa bởi kỹ năng 7 của Boss
       weapon.update(delta * cdRate, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill);
