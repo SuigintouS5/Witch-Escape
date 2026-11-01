@@ -196,7 +196,8 @@ export class Enemy {
       if (this.shootTimer <= 0) {
         this.shootTimer = this.config.shootCooldown;
         if (onShootCallback && distToPlayer < 650) {
-          onShootCallback(this.x, this.y, player.x, player.y);
+          const shootDamage = Math.round((this.damage || 120) * 0.75); // 75% sát thương cơ bản của quái
+          onShootCallback(this.x, this.y, player.x, player.y, shootDamage, { accuracy: this.accuracy || 1.0 });
         }
       }
     } else {

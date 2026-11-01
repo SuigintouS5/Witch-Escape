@@ -331,7 +331,7 @@ export const CONFIG = {
       sprite: 'assets/effects/dark_orb.png',
       speed: 210,
       radius: 12,
-      damage: 14,
+      damage: 90, // Scale x10 chuẩn theo hệ thống (trước đây là 14)
       lifespan: 4.5
     }
   },

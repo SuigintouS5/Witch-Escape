@@ -10,14 +10,15 @@ function getDarkOrbImage() {
 }
 
 export class EnemyProjectile {
-  constructor(startX, startY, targetX, targetY) {
+  constructor(startX, startY, targetX, targetY, damage = null, options = {}) {
     this.x = startX;
     this.y = startY;
 
-    this.speed = CONFIG.PROJECTILES.DARK_ORB.speed;
-    this.radius = CONFIG.PROJECTILES.DARK_ORB.radius;
-    this.damage = CONFIG.PROJECTILES.DARK_ORB.damage;
-    this.lifespan = CONFIG.PROJECTILES.DARK_ORB.lifespan;
+    this.speed = options.speed || CONFIG.PROJECTILES.DARK_ORB.speed;
+    this.radius = options.radius || CONFIG.PROJECTILES.DARK_ORB.radius;
+    this.damage = (damage !== null && damage !== undefined) ? damage : CONFIG.PROJECTILES.DARK_ORB.damage;
+    this.lifespan = options.lifespan || CONFIG.PROJECTILES.DARK_ORB.lifespan;
+    this.accuracy = options.accuracy !== undefined ? options.accuracy : 1.0;
 
     // Vector hướng bay
     const dx = targetX - startX;
@@ -47,7 +48,7 @@ export class EnemyProjectile {
     // Kiểm tra va chạm với Người chơi
     const dist = Math.hypot(this.x - player.x, this.y - player.y);
     if (dist < this.radius + player.getHitboxRadius()) {
-      if (player.takeDamage(this.damage, { attackerAccuracy: 1.0 }, particles)) {
+      if (player.takeDamage(this.damage, { attackerAccuracy: this.accuracy }, particles)) {
         this.isDead = true;
         return { hit: true, damage: this.damage };
       }

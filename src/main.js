@@ -23,6 +23,7 @@ import {
 } from './MasterySystem.js';
 import { BookSystem, BOOK_DEFINITIONS, STARTER_BOOK_IDS } from './BookSystem.js';
 import { BookDrop } from './BookDrop.js';
+import { AudioManager } from './AudioManager.js';
 
 // Cache các icon pixel art từ bộ asset mới để vẽ tức thì
 const ICON_CACHE = {};
@@ -109,9 +110,17 @@ class Game {
     };
     this.pauseActions = {
       resume: { x: this.canvas.width / 2 - 180, y: 0, w: 360, h: 58 },
+      settings: { x: 0, y: 0, w: 220, h: 56 },
       saveExit: { x: this.canvas.width / 2 - 290, y: 0, w: 270, h: 56 },
       exitFinish: { x: this.canvas.width / 2 + 20, y: 0, w: 270, h: 56 }
     };
+
+    // Hệ Thống Âm Thanh & Nhạc Nền (Piano BGM)
+    this.audioManager = new AudioManager();
+    this.isSettingOpen = false;
+    if (this.audioManager) {
+      this.audioManager.playMenuMusic();
+    }
 
     // Bắt đầu từ Menu Chính
     // this.initGame();
@@ -228,6 +237,11 @@ class Game {
       this.player.y - 100
     );
     this.enemies.push(initialReaper);
+
+    // Bắt đầu phát nhạc nền chiến đấu BADDY BADDY
+    if (this.audioManager) {
+      this.audioManager.playNormal();
+    }
   }
 
   // Kiểm tra có trận đấu lưu dở hay không
@@ -292,6 +306,9 @@ class Game {
 
     this.isPaused = false;
     this.gameState = 'MAIN_MENU';
+    if (this.audioManager) {
+      this.audioManager.playMenuMusic();
+    }
   }
 
   // 2. Thoát trận đấu và xem bảng tổng kết
@@ -371,7 +388,12 @@ class Game {
     this.isPaused = false;
     this.isLevelUpOpen = false;
     this.isEvolutionOpen = false;
+    this.isSettingOpen = false;
     this.gameState = 'PLAYING';
+
+    if (this.audioManager) {
+      this.audioManager.playNormal();
+    }
   }
 
   // Kết thúc trận đấu & Tính điểm thưởng + Tiền vàng
@@ -381,6 +403,10 @@ class Game {
     } catch (e) {}
 
     this.gameState = 'GAME_OVER';
+
+    if (this.audioManager && this.audioManager.currentTrack === 'boss') {
+      this.audioManager.playNormal();
+    }
 
     const timeScore = Math.floor(this.gameTime) * 15;
     const killScore = this.killCount * 25;
@@ -450,6 +476,9 @@ class Game {
   togglePause() {
     if (this.player.isDead || this.isLevelUpOpen || this.isEvolutionOpen) return;
     this.isPaused = !this.isPaused;
+    if (!this.isPaused) {
+      this.isSettingOpen = false;
+    }
   }
 
   addXP(amount) {
@@ -485,8 +514,15 @@ class Game {
   }
 
   onKeyDown(e) {
+    if (this.audioManager) this.audioManager.unlockAudio();
+
     if (e.key === 'f' || e.key === 'F') {
       this.toggleFullscreen();
+      return;
+    }
+
+    if (e.key === 'Escape' && this.isSettingOpen) {
+      this.isSettingOpen = false;
       return;
     }
 
@@ -623,9 +659,83 @@ class Game {
     }
   }
 
+  // Xử lý các tương tác trên bảng Cài Đặt (Setting Modal)
+  handleSettingModalClick(mouseX, mouseY) {
+    if (!this.isSettingOpen) return false;
+
+    // Nút Đóng
+    if (
+      this.settingCloseBtn &&
+      mouseX >= this.settingCloseBtn.x && mouseX <= this.settingCloseBtn.x + this.settingCloseBtn.w &&
+      mouseY >= this.settingCloseBtn.y && mouseY <= this.settingCloseBtn.y + this.settingCloseBtn.h
+    ) {
+      this.isSettingOpen = false;
+      return true;
+    }
+
+    // Nút Giảm Âm Lượng [-10%]
+    if (
+      this.volMinusBtn &&
+      mouseX >= this.volMinusBtn.x && mouseX <= this.volMinusBtn.x + this.volMinusBtn.w &&
+      mouseY >= this.volMinusBtn.y && mouseY <= this.volMinusBtn.y + this.volMinusBtn.h
+    ) {
+      if (this.audioManager) this.audioManager.changeVolume(-0.1);
+      return true;
+    }
+
+    // Nút Tăng Âm Lượng [+10%]
+    if (
+      this.volPlusBtn &&
+      mouseX >= this.volPlusBtn.x && mouseX <= this.volPlusBtn.x + this.volPlusBtn.w &&
+      mouseY >= this.volPlusBtn.y && mouseY <= this.volPlusBtn.y + this.volPlusBtn.h
+    ) {
+      if (this.audioManager) this.audioManager.changeVolume(0.1);
+      return true;
+    }
+
+    // Nút Bật / Tắt Tiếng
+    if (
+      this.volMuteBtn &&
+      mouseX >= this.volMuteBtn.x && mouseX <= this.volMuteBtn.x + this.volMuteBtn.w &&
+      mouseY >= this.volMuteBtn.y && mouseY <= this.volMuteBtn.y + this.volMuteBtn.h
+    ) {
+      if (this.audioManager) this.audioManager.toggleMute();
+      return true;
+    }
+
+    // Nhấp trực tiếp trên thanh Volume Bar
+    if (
+      this.volBarRect &&
+      mouseX >= this.volBarRect.x && mouseX <= this.volBarRect.x + this.volBarRect.w &&
+      mouseY >= this.volBarRect.y && mouseY <= this.volBarRect.y + this.volBarRect.h
+    ) {
+      const ratio = (mouseX - this.volBarRect.x) / this.volBarRect.w;
+      if (this.audioManager) this.audioManager.setVolume(ratio);
+      return true;
+    }
+
+    // Nhấp ra ngoài bảng Setting để đóng
+    if (
+      this.settingModalRect &&
+      (mouseX < this.settingModalRect.x || mouseX > this.settingModalRect.x + this.settingModalRect.w ||
+       mouseY < this.settingModalRect.y || mouseY > this.settingModalRect.y + this.settingModalRect.h)
+    ) {
+      this.isSettingOpen = false;
+      return true;
+    }
+
+    return true; // Chặn click xuyên qua phía sau khi click vào thân bảng modal
+  }
+
   onPointerDown(e) {
     if (e.button !== 0) return; // Chỉ nhận chuột trái
+    if (this.audioManager) this.audioManager.unlockAudio();
     const { mouseX, mouseY } = this.getCanvasMousePos(e);
+
+    // 0. Nếu đang mở bảng Cài Đặt (Setting Modal) ở bất kỳ màn hình nào
+    if (this.isSettingOpen) {
+      if (this.handleSettingModalClick(mouseX, mouseY)) return;
+    }
 
     // XỬ LÝ CLICK TRÊN CÁC MÀN HÌNH MENU (MAIN_MENU, CHAR_SELECT, DIFF_SELECT, SHOP, SKILL_TREE, GAME_OVER, CODEX)
     if (this.gameState !== 'PLAYING') {
@@ -772,12 +882,22 @@ class Game {
     }
 
     if (this.isPaused) {
+      if (this.isSettingOpen) return;
+
       const p = this.pauseActions;
       if (
         mouseX >= p.resume.x && mouseX <= p.resume.x + p.resume.w &&
         mouseY >= p.resume.y && mouseY <= p.resume.y + p.resume.h
       ) {
         this.togglePause();
+        return;
+      }
+      if (
+        p.settings &&
+        mouseX >= p.settings.x && mouseX <= p.settings.x + p.settings.w &&
+        mouseY >= p.settings.y && mouseY <= p.settings.y + p.settings.h
+      ) {
+        this.isSettingOpen = true;
         return;
       }
       if (
@@ -865,7 +985,10 @@ class Game {
   }
 
   handleMenuClick(actionId, btnData) {
-    if (actionId === 'resume_saved_game') {
+    if (actionId === 'open_settings') {
+      this.isSettingOpen = true;
+      return;
+    } else if (actionId === 'resume_saved_game') {
       this.loadSavedGame();
     } else if (actionId === 'toggle_fullscreen') {
       this.toggleFullscreen();
@@ -942,6 +1065,7 @@ class Game {
       }
     } else if (actionId === 'back_from_skill_tree') {
       this.gameState = 'MAIN_MENU';
+      if (this.audioManager) this.audioManager.playMenuMusic();
     } else if (actionId === 'how_to_play') {
       alert('🎮 HƯỚNG DẪN CHƠI:\n- Di chuyển: Phím W, A, S, D hoặc Mũi tên\n- Tấn công: Tự động 100%\n- Nhặt Đá Kinh Nghiệm để thăng cấp và chọn vũ khí\n- Khi có 2 vũ khí Max Cấp 7, Lõi Tiến Hóa sẽ rơi xuống để Hợp Nhất Vũ Khí Tối Thượng!\n- Tiêu diệt quái kiếm Vàng để Nâng Cấp Vĩnh Viễn tại Cổ Viện Ma Pháp.');
     } else if (actionId.startsWith('select_char_')) {
@@ -1003,6 +1127,7 @@ class Game {
       this.codexScrollY = Math.min(2200, this.codexScrollY + 220);
     } else if (actionId === 'back_to_menu') {
       this.gameState = 'MAIN_MENU';
+      if (this.audioManager) this.audioManager.playMenuMusic();
     } else if (actionId === 'back_to_char_select') {
       this.gameState = 'CHAR_SELECT';
     } else if (actionId === 'back_to_mode_select') {
@@ -1251,8 +1376,8 @@ class Game {
       }
 
       // 5. Quái bám đuổi & gây sát thương
-      const onEnemyShoot = (sx, sy, tx, ty) => {
-        this.enemyProjectiles.push(new EnemyProjectile(sx, sy, tx, ty));
+      const onEnemyShoot = (sx, sy, tx, ty, damage = null, options = {}) => {
+        this.enemyProjectiles.push(new EnemyProjectile(sx, sy, tx, ty, damage, options));
       };
 
       const dmgReduction = this.upgradeManager.getDamageReduction();
@@ -1428,6 +1553,16 @@ class Game {
               choices: choices
             };
           }
+        }
+      }
+
+      // 8.7. Cập nhật Âm nhạc chiến đấu (Tự động chuyển bài khi Main Boss xuất hiện / bị tiêu diệt)
+      if (this.audioManager && this.gameState === 'PLAYING') {
+        const hasActiveMainBoss = this.enemies.some(e => e.isMainBoss && !e.isDead);
+        if (hasActiveMainBoss && this.audioManager.currentTrack !== 'boss') {
+          this.audioManager.playBoss();
+        } else if (!hasActiveMainBoss && this.audioManager.currentTrack === 'boss') {
+          this.audioManager.playNormal();
         }
       }
 
@@ -2398,25 +2533,38 @@ class Game {
     this.ctx.fillStyle = '#4ade80';
     this.ctx.fillText('⏩ Phím [7]: Tua +60s  |  ⏩ Phím [8]: Nhảy tới Boss tiếp theo  |  ⏩ Phím [9]: Tua +3 phút', this.canvas.width / 2, panelY + 774);
 
-    // Cập nhật vị trí các nút trong pauseActions
+    // Cập nhật vị trí các nút trong pauseActions (4 Nút: Tiếp tục | Cài đặt | Lưu & Thoát | Thoát & Tổng kết)
     const p = this.pauseActions;
-    const btnW = 260;
     const btnH = 56;
     const btnY = panelY + 810;
+    const btnGap = 20;
 
-    p.resume.x = this.canvas.width / 2 - 420;
+    const w1 = 260; // Tiếp tục
+    const w2 = 230; // Cài đặt
+    const w3 = 240; // Lưu & Thoát
+    const w4 = 260; // Thoát & Tổng Kết
+    const totalBtnW = w1 + w2 + w3 + w4 + btnGap * 3;
+    const startX = Math.round(this.canvas.width / 2 - totalBtnW / 2);
+
+    p.resume.x = startX;
     p.resume.y = btnY;
-    p.resume.w = btnW;
+    p.resume.w = w1;
     p.resume.h = btnH;
 
-    p.saveExit.x = this.canvas.width / 2 - btnW / 2;
+    p.settings = p.settings || {};
+    p.settings.x = startX + w1 + btnGap;
+    p.settings.y = btnY;
+    p.settings.w = w2;
+    p.settings.h = btnH;
+
+    p.saveExit.x = startX + w1 + btnGap + w2 + btnGap;
     p.saveExit.y = btnY;
-    p.saveExit.w = btnW;
+    p.saveExit.w = w3;
     p.saveExit.h = btnH;
 
-    p.exitFinish.x = this.canvas.width / 2 + 160;
+    p.exitFinish.x = startX + w1 + btnGap + w2 + btnGap + w3 + btnGap;
     p.exitFinish.y = btnY;
-    p.exitFinish.w = btnW;
+    p.exitFinish.w = w4;
     p.exitFinish.h = btnH;
 
     // 1. Nút Tiếp Tục Chơi
@@ -2429,7 +2577,17 @@ class Game {
     this.ctx.font = 'bold 20px sans-serif';
     this.ctx.fillText('▶ TIẾP TỤC CHƠI', p.resume.x + p.resume.w / 2, p.resume.y + 36);
 
-    // 2. Nút Lưu & Thoát
+    // 2. Nút Cài Đặt (Setting)
+    this.ctx.fillStyle = '#581c87';
+    this.ctx.fillRect(p.settings.x, p.settings.y, p.settings.w, p.settings.h);
+    this.ctx.strokeStyle = '#c084fc';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(p.settings.x, p.settings.y, p.settings.w, p.settings.h);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 19px sans-serif';
+    this.ctx.fillText('⚙️ CÀI ĐẶT', p.settings.x + p.settings.w / 2, p.settings.y + 36);
+
+    // 3. Nút Lưu & Thoát
     this.ctx.fillStyle = '#1e3a8a';
     this.ctx.fillRect(p.saveExit.x, p.saveExit.y, p.saveExit.w, p.saveExit.h);
     this.ctx.strokeStyle = '#60a5fa';
@@ -2439,7 +2597,7 @@ class Game {
     this.ctx.font = 'bold 18px sans-serif';
     this.ctx.fillText('💾 LƯU & THOÁT', p.saveExit.x + p.saveExit.w / 2, p.saveExit.y + 35);
 
-    // 3. Nút Thoát & Tổng Kết
+    // 4. Nút Thoát & Tổng Kết
     this.ctx.fillStyle = '#991b1b';
     this.ctx.fillRect(p.exitFinish.x, p.exitFinish.y, p.exitFinish.w, p.exitFinish.h);
     this.ctx.strokeStyle = '#f87171';
@@ -2454,11 +2612,195 @@ class Game {
     this.ctx.font = 'italic 15px sans-serif';
     this.ctx.fillText('💡 Có thể bấm "Vứt Bỏ" để giải phóng ô sách, hoặc "Tiến Hóa" để nâng cấp sách ngay trong trận.', this.canvas.width / 2, panelY + 910);
 
+    // Nếu đang mở Bảng Cài Đặt (Setting Modal)
+    if (this.isSettingOpen) {
+      this.renderSettingModal();
+    }
+
+    this.ctx.restore();
+  }
+
+  // =========================================================================
+  // BẢNG CÀI ĐẶT HỆ THỐNG & ĐIỀU CHỈNH ÂM LƯỢNG (SETTING MODAL)
+  // =========================================================================
+  renderSettingModal() {
+    this.ctx.save();
+
+    // Lớp phủ đen ma thuật mờ nền
+    this.ctx.fillStyle = 'rgba(4, 6, 12, 0.88)';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    const modalW = 820;
+    const modalH = 490;
+    const modalX = Math.round((this.canvas.width - modalW) / 2);
+    const modalY = Math.round((this.canvas.height - modalH) / 2);
+    this.settingModalRect = { x: modalX, y: modalY, w: modalW, h: modalH };
+
+    // Khung bảng hoàng gia viền vàng
+    this.ctx.fillStyle = 'rgba(15, 20, 32, 0.98)';
+    this.ctx.fillRect(modalX, modalY, modalW, modalH);
+    this.ctx.strokeStyle = '#ffd700';
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeRect(modalX, modalY, modalW, modalH);
+
+    // Tiêu đề
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 34px "Segoe UI", serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⚙️ CÀI ĐẶT HỆ THỐNG', this.canvas.width / 2, modalY + 54);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '15px "Segoe UI", sans-serif';
+    this.ctx.fillText('Điều chỉnh âm lượng nhạc nền và các thiết lập trong trò chơi', this.canvas.width / 2, modalY + 84);
+
+    // Kẻ viền ngăn cách
+    this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.25)';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.beginPath();
+    this.ctx.moveTo(modalX + 50, modalY + 104);
+    this.ctx.lineTo(modalX + modalW - 50, modalY + 104);
+    this.ctx.stroke();
+
+    // 1. KHU VỰC ĐIỀU CHỈNH ÂM LƯỢNG
+    const volSecY = modalY + 130;
+    const currentVol = this.audioManager ? this.audioManager.volume : 0.5;
+    const isMuted = this.audioManager ? this.audioManager.isMuted : false;
+    const volPercent = isMuted ? 0 : Math.round(currentVol * 100);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+    this.ctx.fillText('🎵 ÂM LƯỢNG NHẠC NỀN (BGM):', modalX + 60, volSecY + 22);
+
+    this.ctx.textAlign = 'right';
+    this.ctx.fillStyle = isMuted ? '#f87171' : '#38bdf8';
+    this.ctx.font = 'bold 20px monospace';
+    this.ctx.fillText(isMuted ? '🔇 ĐÃ TẮT TIẾNG' : `🔊 ${volPercent}%`, modalX + modalW - 60, volSecY + 22);
+
+    // Thanh Slider Volume Bar (Nhấp vào vị trí bất kỳ để set volume)
+    const barX = modalX + 60;
+    const barY = volSecY + 45;
+    const barW = modalW - 120;
+    const barH = 30;
+    this.volBarRect = { x: barX, y: barY, w: barW, h: barH };
+
+    // Nền thanh trượt
+    this.ctx.fillStyle = '#0f172a';
+    this.ctx.fillRect(barX, barY, barW, barH);
+    this.ctx.strokeStyle = '#334155';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(barX, barY, barW, barH);
+
+    // Phần trăm đã đổ màu
+    const fillRatio = isMuted ? 0 : currentVol;
+    const fillW = Math.round(barW * fillRatio);
+    if (fillW > 0) {
+      const grad = this.ctx.createLinearGradient(barX, barY, barX + fillW, barY);
+      grad.addColorStop(0, '#0284c7');
+      grad.addColorStop(1, '#38bdf8');
+      this.ctx.fillStyle = grad;
+      this.ctx.fillRect(barX + 2, barY + 2, fillW - 4, barH - 4);
+    }
+
+    // Nút trượt tròn
+    const knobX = barX + Math.round(barW * fillRatio);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.beginPath();
+    this.ctx.arc(knobX, barY + barH / 2, 10, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.strokeStyle = '#38bdf8';
+    this.ctx.lineWidth = 2.5;
+    this.ctx.stroke();
+
+    // 3 Nút Bấm: [-10%] | [+10%] | [BẬT/TẮT TIẾNG]
+    const btnSecY = barY + barH + 24;
+    const actBtnH = 46;
+
+    // Nút Giảm [-10%]
+    const minusW = 160;
+    const minusX = barX;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(minusX, btnSecY, minusW, actBtnH);
+    this.ctx.strokeStyle = '#475569';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(minusX, btnSecY, minusW, actBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🔉 GIẢM (-10%)', minusX + minusW / 2, btnSecY + 28);
+    this.volMinusBtn = { x: minusX, y: btnSecY, w: minusW, h: actBtnH };
+
+    // Nút Tăng [+10%]
+    const plusW = 160;
+    const plusX = minusX + minusW + 20;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(plusX, btnSecY, plusW, actBtnH);
+    this.ctx.strokeStyle = '#475569';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(plusX, btnSecY, plusW, actBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.fillText('🔊 TĂNG (+10%)', plusX + plusW / 2, btnSecY + 28);
+    this.volPlusBtn = { x: plusX, y: btnSecY, w: plusW, h: actBtnH };
+
+    // Nút Bật/Tắt Tiếng
+    const muteW = 180;
+    const muteX = modalX + modalW - 60 - muteW;
+    this.ctx.fillStyle = isMuted ? '#7f1d1d' : '#854d0e';
+    this.ctx.fillRect(muteX, btnSecY, muteW, actBtnH);
+    this.ctx.strokeStyle = isMuted ? '#f87171' : '#f59e0b';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(muteX, btnSecY, muteW, actBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 15px sans-serif';
+    this.ctx.fillText(isMuted ? '🔊 BẬT TIẾNG' : '🔇 TẮT TIẾNG', muteX + muteW / 2, btnSecY + 28);
+    this.volMuteBtn = { x: muteX, y: btnSecY, w: muteW, h: actBtnH };
+
+    // 2. KHU VỰC THÔNG TIN BÀI HÁT ĐANG PHÁT
+    const infoSecY = btnSecY + actBtnH + 30;
+    this.ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
+    this.ctx.fillRect(barX, infoSecY, barW, 64);
+    this.ctx.strokeStyle = '#334155';
+    this.ctx.lineWidth = 1.2;
+    this.ctx.strokeRect(barX, infoSecY, barW, 64);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '13px "Segoe UI", sans-serif';
+    this.ctx.fillText('🎶 Bài Hát Đang Phát:', barX + 18, infoSecY + 24);
+
+    const trackTitle = this.audioManager ? this.audioManager.getCurrentTrackTitle() : 'BADDY BADDY';
+    this.ctx.fillStyle = '#ffd166';
+    this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+    this.ctx.fillText(trackTitle, barX + 18, infoSecY + 48);
+
+    // 3. NÚT ĐÓNG BẢNG CÀI ĐẶT
+    const closeBtnW = 200;
+    const closeBtnH = 48;
+    const closeBtnX = modalX + modalW / 2 - closeBtnW / 2;
+    const closeBtnY = modalY + modalH - 66;
+
+    this.ctx.fillStyle = '#334155';
+    this.ctx.fillRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
+    this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('✖ ĐÓNG (ESC)', closeBtnX + closeBtnW / 2, closeBtnY + 30);
+    this.settingCloseBtn = { x: closeBtnX, y: closeBtnY, w: closeBtnW, h: closeBtnH };
+
     this.ctx.restore();
   }
 
   renderMainMenu() {
     this.ctx.save();
+
+    // Tự động duy trì nhạc nền Main Menu (ngẫu nhiên 3 bài trong folder Piano/bgm)
+    if (this.audioManager && this.audioManager.currentTrack !== 'menu') {
+      this.audioManager.playMenuMusic();
+    }
 
     // Nền tối ma thuật huyền bí
     const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height);
@@ -2520,7 +2862,7 @@ class Game {
     // Các Nút Menu Chính
     const savedInfo = this.getSavedGameInfo();
     const btnW = 480;
-    const btnH = 58;
+    const btnH = 54;
     const btnX = this.canvas.width / 2 - btnW / 2;
 
     const buttons = [];
@@ -2535,17 +2877,19 @@ class Game {
         color: '#1d4ed8',
         border: '#60a5fa'
       });
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 470, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 535, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 600, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 665, color: '#451a03', border: '#d4af37' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 730, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 468, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 531, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 594, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 657, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 720, color: '#334155', border: '#64748b' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 783, color: '#1e293b', border: '#475569' });
     } else {
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 420, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 485, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 550, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 615, color: '#451a03', border: '#d4af37' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 680, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 415, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 479, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 543, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 607, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 671, color: '#334155', border: '#64748b' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 735, color: '#1e293b', border: '#475569' });
     }
 
     for (const b of buttons) {
@@ -2556,9 +2900,9 @@ class Game {
       this.ctx.strokeRect(btnX, b.y, btnW, btnH);
 
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 22px sans-serif';
+      this.ctx.font = 'bold 21px sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(b.label, this.canvas.width / 2, b.y + 41);
+      this.ctx.fillText(b.label, this.canvas.width / 2, b.y + 38);
 
       this.menuButtons.push({ x: btnX, y: b.y, w: btnW, h: btnH, id: b.id });
     }
@@ -2566,6 +2910,11 @@ class Game {
     this.ctx.fillStyle = '#64748b';
     this.ctx.font = '16px monospace';
     this.ctx.fillText('Phiên bản v2.0 - Giai đoạn 5 Hoàn Thiện (1080p Full HD)', this.canvas.width / 2, this.canvas.height - 45);
+
+    // Nếu đang mở bảng Cài Đặt (Setting Modal) trên Main Menu
+    if (this.isSettingOpen) {
+      this.renderSettingModal();
+    }
 
     this.ctx.restore();
   }
@@ -3829,11 +4178,11 @@ class Game {
       this.ctx.shadowBlur = 0;
     }
 
-    // Bảng thống kê chi tiết điểm số & vàng
-    const statBoxW = 940;
+    // Bảng thống kê chi tiết điểm số & vàng (mở rộng tránh đè chữ thông thạo)
+    const statBoxW = 1060;
     const statBoxH = 550;
     const statBoxX = this.canvas.width / 2 - statBoxW / 2;
-    const statBoxY = 160;
+    const statBoxY = 175;
 
     this.ctx.fillStyle = 'rgba(20, 24, 36, 0.96)';
     this.ctx.fillRect(statBoxX, statBoxY, statBoxW, statBoxH);
@@ -3924,14 +4273,15 @@ class Game {
     this.ctx.fillText(`+${s.goldEarned} Vàng`, rightX, textY);
 
     textY += 44;
-    this.ctx.font = 'bold 22px "Segoe UI", sans-serif';
+    this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#c084fc';
-    this.ctx.fillText(`🔮 THÔNG THẠO (${s.charName || 'Nhân Vật'}):`, leftX, textY);
+    const charName = s.charName || 'Nhân Vật';
+    this.ctx.fillText(`🔮 THÔNG THẠO [${charName}]:`, leftX, textY);
     this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#fde047';
     if (s.charMastery) {
-      this.ctx.fillText(`+${s.score.toLocaleString()} Score (Cấp ${s.charMastery.level}/100)`, rightX, textY);
+      this.ctx.fillText(`+${s.score.toLocaleString()} Score  (Cấp ${s.charMastery.level}/100)`, rightX, textY);
     } else {
       this.ctx.fillText(`+${s.score.toLocaleString()} Score`, rightX, textY);
     }
@@ -3939,10 +4289,10 @@ class Game {
 
     // 2 Nút: Chơi Lại hoặc Về Menu Chính
     const btnW = 320;
-    const btnH = 62;
+    const btnH = 60;
     const retryBtnX = this.canvas.width / 2 + 20;
     const menuBtnX = this.canvas.width / 2 - btnW - 20;
-    const btnY = statBoxY + statBoxH + 35;
+    const btnY = statBoxY + statBoxH + 28;
 
     // Về Menu
     this.ctx.fillStyle = '#334155';

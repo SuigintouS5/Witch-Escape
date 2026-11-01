@@ -908,9 +908,10 @@ export class YukiBoss {
       if (this.orbitFireTimer <= 0) {
         // Bắn tỏa ra 8 hướng
         if (onShootCallback) {
+          const bossOrbDmg = Math.round(this.damage * 0.45); // 380 * 0.45 = 171 dmg
           for (let i = 0; i < 8; i++) {
             const ang = (Math.PI * 2 * i) / 8;
-            onShootCallback(this.x, this.y, this.x + Math.cos(ang) * 500, this.y + Math.sin(ang) * 500);
+            onShootCallback(this.x, this.y, this.x + Math.cos(ang) * 500, this.y + Math.sin(ang) * 500, bossOrbDmg, { accuracy: this.accuracy || 1.15 });
           }
         }
       }
