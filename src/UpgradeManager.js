@@ -141,7 +141,8 @@ export class UpgradeManager {
   }
 
   // Lấy 3 lựa chọn nâng cấp ngẫu nhiên khi Lên Cấp (Level Up)
-  generateChoices() {
+  // Có loại trừ các vật phẩm đã bị Loại Bỏ (Banish) khỏi trận
+  generateChoices(player = null, banishedIds = new Set()) {
     const choices = [];
 
     // 1. Kiểm tra kỹ năng riêng nhân vật (nếu chưa mở khóa)
@@ -276,10 +277,13 @@ export class UpgradeManager {
       }
     }
 
+    // Lọc bỏ các lựa chọn nằm trong danh sách đã Banish (Loại Bỏ)
+    const validChoices = choices.filter(c => !banishedIds || !banishedIds.has(c.id));
+
     // Rút 3 lựa chọn ngẫu nhiên có trọng số (Weighted Random Sampling without replacement)
     // Vũ khí chính có trọng số 1.30 (+30% tỉ lệ so với 1.00 của các lựa chọn khác)
     const selected = [];
-    const pool = [...choices];
+    const pool = [...validChoices];
     const targetCount = Math.min(3, pool.length);
 
     while (selected.length < targetCount && pool.length > 0) {
@@ -362,21 +366,23 @@ export class UpgradeManager {
     return 1.0;
   }
 
-  // Kiểm tra điều kiện Tiến Hóa: Khi có 2 vũ khí đạt Cấp 7
+  // Kiểm tra điều kiện Tiến Hóa: Khi có 2 vũ khí phụ (không tính Vũ Khí Chính độc nhất) đạt Cấp 7
   checkEvolutionReadiness() {
-    const maxedWeapons = this.attackSlots.filter(w => w.level >= 7);
-    if (maxedWeapons.length >= 2) {
+    const fusibleMaxedWeapons = this.attackSlots.filter(w => w.level >= 7 && !w.isMainWeapon && !w.isUnique && w.id !== 'evolved_storm_sword');
+    if (fusibleMaxedWeapons.length >= 2) {
       this.canEvolve = true;
       return true;
     }
+    this.canEvolve = false;
     return false;
   }
 
-  // Hợp nhất 2 vũ khí Cấp 7 thành 1 vũ khí tối thượng, rút bớt 1 ô vũ khí
+  // Hợp nhất 2 vũ khí phụ Cấp 7 thành 1 vũ khí tối thượng, rút bớt 1 ô vũ khí (Bảo toàn 100% vũ khí chính độc nhất)
   executeEvolution() {
     const maxedIndices = [];
     for (let i = 0; i < this.attackSlots.length; i++) {
-      if (this.attackSlots[i].level >= 7 && this.attackSlots[i].id !== 'evolved_storm_sword') {
+      const w = this.attackSlots[i];
+      if (w.level >= 7 && !w.isMainWeapon && !w.isUnique && w.id !== 'evolved_storm_sword') {
         maxedIndices.push(i);
         if (maxedIndices.length === 2) break;
       }
@@ -410,11 +416,12 @@ export class UpgradeManager {
     return 0;
   }
 
-  getMagnetRadius() {
+  getMagnetRadius(player = null) {
     const base = 140;
+    const metaMult = player && player.metaPickupRangeMult ? player.metaPickupRangeMult : 1.0;
     const magnet = this.passivePool.magnet;
-    if (magnet && magnet.isLocked) return base;
-    return base * (1.0 + magnet.level * 0.25);
+    if (magnet && magnet.isLocked) return base * metaMult;
+    return base * (1.0 + (magnet ? magnet.level * 0.25 : 0)) * metaMult;
   }
 
   // Xuất dữ liệu trang bị để lưu trận đấu
@@ -435,10 +442,16 @@ export class UpgradeManager {
     this.weaponManager.equippedWeapons = [];
     this.attackSlots = this.weaponManager.equippedWeapons;
 
-    for (const wData of data.weapons || []) {
+    const weaponsList = data.weapons || [];
+    for (let i = 0; i < weaponsList.length; i++) {
+      const wData = weaponsList[i];
       const w = createWeaponById(wData.id);
       while (w.level < wData.level) {
         w.upgrade();
+      }
+      if (i === 0 && w.id !== 'evolved_storm_sword') {
+        w.isMainWeapon = true;
+        w.isUnique = true;
       }
       this.weaponManager.equippedWeapons.push(w);
     }

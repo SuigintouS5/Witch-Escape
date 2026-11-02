@@ -125,7 +125,7 @@ export class Enemy {
     return finalAmount;
   }
 
-  update(delta, player, allEnemies, onShootCallback) {
+  update(delta, player, allEnemies, onShootCallback, particles = null) {
     if (this.isDead) return;
 
     // === Cập nhật timers ===
@@ -141,28 +141,65 @@ export class Enemy {
       }
     }
 
-    // Bleed DOT (Xuất huyết cộng dồn - mỗi giây mất máu)
+    // Bleed & Zone DOT timers
     if (this.bleedTimer > 0) {
       this.bleedTimer -= delta;
-      const bleedDmgPerSecond = this.maxHealth * 0.001 * this.bleedStacks; // 0.1% × số stack
-      this.health -= bleedDmgPerSecond * delta;
-      if (this.health <= 0 && !this.isDead) {
-        this.health = 0;
-        this.isDead = true;
-      }
-      if (this.bleedTimer <= 0) {
-        this.bleedStacks = 0;
-      }
+      if (this.bleedTimer <= 0) this.bleedStacks = 0;
     }
-
-    // Zone DOT (Thiêu đốt kéo dài từ Dung Nham)
     if (this.zoneDotTimer > 0) {
       this.zoneDotTimer -= delta;
-      this.health -= this.zoneDotDmg * delta;
-      if (this.health <= 0 && !this.isDead) {
-        this.health = 0;
-        this.isDead = true;
+    }
+
+    // === XỬ LÝ SÁT THƯƠNG DOT (BLEED & BURN / ZONE DOT) ===
+    if (this.bleedTimer > 0 || this.zoneDotTimer > 0) {
+      this.dotTickTimer = (this.dotTickTimer || 0) + delta;
+      if (this.dotTickTimer >= 0.4) {
+        const tickRatio = this.dotTickTimer;
+        this.dotTickTimer = 0;
+
+        const dotDmgMult = 1.0 + (player && player.bookStats ? (player.bookStats.dotDmgMult || 0) : 0);
+        let tickDmg = 0;
+
+        if (this.bleedTimer > 0) {
+          const bleedPerSec = this.maxHealth * 0.001 * this.bleedStacks * dotDmgMult;
+          tickDmg += bleedPerSec * tickRatio;
+        }
+
+        if (this.zoneDotTimer > 0) {
+          tickDmg += (this.zoneDotDmg * dotDmgMult) * tickRatio;
+        }
+
+        if (tickDmg > 0 && !this.isDead) {
+          let isCrit = false;
+          let critTier = 0;
+          // Cơ chế Neil Postman: dotCanCrit cho phép DOT nổ chí mạng
+          if (player && player.bookStats && player.bookStats.dotCanCrit) {
+            const totalCritChance = (player.critChance || 0) + (player.bookStats.critChance || 0);
+            if (totalCritChance > 0) {
+              const tiers = Math.floor(totalCritChance);
+              const extra = totalCritChance - tiers;
+              critTier = tiers + (Math.random() < extra ? 1 : 0);
+              if (critTier > 0) {
+                isCrit = true;
+                const totalCritDamage = (player.critDamage || 1.5) + (player.bookStats.critDamage || 0);
+                tickDmg *= Math.pow(totalCritDamage, critTier);
+              }
+            }
+          }
+
+          const actualDmg = Math.max(1, Math.round(tickDmg));
+          this.health -= actualDmg;
+          if (particles && particles.createDamageNumber) {
+            particles.createDamageNumber(this.x, this.y - 12, actualDmg, isCrit, false, false, false, isCrit ? null : '#ff8533', critTier);
+          }
+          if (this.health <= 0 && !this.isDead) {
+            this.health = 0;
+            this.isDead = true;
+          }
+        }
       }
+    } else {
+      this.dotTickTimer = 0;
     }
 
     if (this.isDead) return;

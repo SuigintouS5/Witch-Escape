@@ -7,106 +7,238 @@ export class MetaProgression {
     this.highScore = 0;
     this.totalKills = 0;
 
-    // Các nâng cấp vĩnh viễn bằng vàng ngoài Menu
+    // Kho nâng cấp vĩnh viễn bằng vàng được Rework hoàn toàn (20 nâng cấp chia 3 nhóm)
     this.upgrades = {
-      health: {
-        id: 'health',
-        name: 'Thể Lực Cổ Đại',
-        icon: '❤️',
+      // =========================================================================
+      // I. MỤC NỘI TẠI & CƠ CHẾ (PASSIVE - 6 NÂNG CẤP)
+      // =========================================================================
+      unlockSpecialSkill: {
+        id: 'unlockSpecialSkill',
+        category: 'passive',
+        name: 'Khai Mở Tuyệt Kỹ',
+        icon: '⚡',
         level: 0,
-        maxLevel: 5,
-        baseCost: 100,
-        costMult: 1.6,
-        valuePerLevel: 200, // +200 Máu tối đa mỗi cấp (Scale x10)
-        desc: '+200 Máu tối đa cho tất cả nhân vật.'
+        maxLevel: 1,
+        costs: [500],
+        valuePerLevel: 1,
+        desc: 'Mở khóa Kỹ năng Đặc Biệt [Phím G] của nhân vật trong trận đấu.'
       },
-      damage: {
-        id: 'damage',
-        name: 'Sức Mạnh Linh Hồn',
-        icon: '⚔️',
+      enhanceSpecialAndMain: {
+        id: 'enhanceSpecialAndMain',
+        category: 'passive',
+        name: 'Cường Hóa Bản Mệnh',
+        icon: '👑',
         level: 0,
-        maxLevel: 5,
-        baseCost: 150,
-        costMult: 1.8,
-        valuePerLevel: 0.10, // +10% Sát thương toàn bộ vũ khí
-        desc: '+10% Sát thương vũ khí cơ bản.'
+        maxLevel: 3,
+        costs: [500, 10000, 50000],
+        valuePerLevel: 0.01,
+        desc: '+1% Sát thương và hiệu ứng của Kỹ năng [G] & Vũ khí Chính mỗi cấp.'
       },
-      armor: {
-        id: 'armor',
-        name: 'Giáp Ma Cổ Viện',
-        icon: '🛡️',
+      bonusRerolls: {
+        id: 'bonusRerolls',
+        category: 'passive',
+        name: 'Vận Mệnh Xoay Vần (Reroll)',
+        icon: '🎲',
         level: 0,
-        maxLevel: 5,
-        baseCost: 120,
-        costMult: 1.7,
-        valuePerLevel: 6, // +6 Điểm Giáp phòng ngự mỗi cấp
-        desc: '+6 Điểm Giáp phòng ngự giảm sát thương nhận vào.'
+        maxLevel: 10,
+        costs: [2500, 5000, 7500, 10000, 12500, 15000, 17500, 20000, 22500, 25000],
+        valuePerLevel: 1,
+        desc: '+1 Lượt Đổi Lại (Reroll) danh sách nâng cấp khi lên cấp trong trận (dùng là mất).'
       },
-      critChance: {
-        id: 'critChance',
-        name: 'Nhãn Thần Bạo Kích',
-        icon: '💥',
+      bonusBanishes: {
+        id: 'bonusBanishes',
+        category: 'passive',
+        name: 'Trục Xuất Vĩnh Viễn (Banish)',
+        icon: '🚫',
         level: 0,
         maxLevel: 5,
-        baseCost: 200,
-        costMult: 2.0,
-        valuePerLevel: 0.03, // +3% Tỉ lệ chí mạng
-        desc: '+3% Tỉ lệ chí mạng cơ bản.'
-      },
-      speed: {
-        id: 'speed',
-        name: 'Hài Thần Tốc',
-        icon: '👟',
-        level: 0,
-        maxLevel: 5,
-        baseCost: 100,
-        costMult: 1.5,
-        valuePerLevel: 0.06, // +6% Tốc độ di chuyển
-        desc: '+6% Tốc độ di chuyển nhân vật.'
-      },
-      greed: {
-        id: 'greed',
-        name: 'Thuật Luyện Kim',
-        icon: '🪙',
-        level: 0,
-        maxLevel: 5,
-        baseCost: 120,
-        costMult: 1.7,
-        valuePerLevel: 0.20, // +20% Vàng nhận được
-        desc: '+20% Tiền Vàng thu được sau mỗi trận.'
+        costs: [5000, 10000, 15000, 20000, 25000],
+        valuePerLevel: 1,
+        desc: '+1 Lượt Loại Bỏ khi lên cấp (vật phẩm bị loại sẽ không bao giờ xuất hiện lại).'
       },
       bookSlots: {
         id: 'bookSlots',
-        name: 'Kệ Sách Cổ Điển',
+        category: 'passive',
+        name: 'Kệ Sách Cổ Viện',
         icon: '📚',
         level: 0,
         maxLevel: 2,
-        baseCost: 350,
-        costMult: 2.5,
-        valuePerLevel: 1, // +1 Ô chứa sách
-        desc: '+1 Ô chứa Sách trong trận (Khởi đầu 3 ô, tối đa 5 ô).'
+        costs: [500, 10000],
+        valuePerLevel: 1,
+        desc: '+1 Ô chứa Sách Tác Phẩm trong trận (Khởi đầu 3 ô, tối đa 5 ô).'
       },
       starterBooks: {
         id: 'starterBooks',
+        category: 'passive',
         name: 'Khai Sáng Ban Đầu',
         icon: '📜',
         level: 0,
         maxLevel: 1,
-        baseCost: 500,
-        costMult: 2.0,
-        valuePerLevel: 1, // Chọn thêm 1 sách khởi đầu
+        costs: [5000],
+        valuePerLevel: 1,
         desc: 'Cho phép mang thêm 1 Sách Khởi Đầu trước trận đấu (Tổng cộng 2 cuốn).'
       },
-      bookDropRate: {
-        id: 'bookDropRate',
-        name: 'Cơ Duyên Học Vấn',
+
+      // =========================================================================
+      // II. MỤC CHỈ SỐ NHÂN VẬT (STATS - 12 NÂNG CẤP)
+      // =========================================================================
+      health: {
+        id: 'health',
+        category: 'stats',
+        name: 'Sinh Lực Cổ Đại',
+        icon: '❤️',
+        level: 0,
+        maxLevel: 10,
+        costs: [200, 500, 1200, 2750, 6000, 12000, 18000, 24000, 30000, 36000],
+        valuePerLevel: 0.05,
+        desc: '+5% Máu tối đa của nhân vật mỗi cấp (Tối đa +50% Máu).'
+      },
+      damage: {
+        id: 'damage',
+        category: 'stats',
+        name: 'Sức Mạnh Linh Hồn',
+        icon: '⚔️',
+        level: 0,
+        maxLevel: 10,
+        costs: [300, 750, 1800, 4100, 9100, 18000, 25000, 31000, 37000, 43000],
+        valuePerLevel: 0.06,
+        desc: '+6% Sát thương toàn bộ vũ khí mỗi cấp (Tối đa +60% Dmg).'
+      },
+      speed: {
+        id: 'speed',
+        category: 'stats',
+        name: 'Hài Thần Tốc',
+        icon: '👟',
+        level: 0,
+        maxLevel: 10,
+        costs: [200, 500, 1200, 2750, 6000, 12000, 18000, 24000, 30000, 36000],
+        valuePerLevel: 0.06,
+        desc: '+6% Tốc độ di chuyển nhân vật mỗi cấp (Tối đa +60% Tốc chạy).'
+      },
+      critChance: {
+        id: 'critChance',
+        category: 'stats',
+        name: 'Nhãn Thần Bạo Kích',
+        icon: '💥',
+        level: 0,
+        maxLevel: 10,
+        costs: [200, 500, 1200, 2750, 6000, 12000, 18000, 24000, 30000, 36000],
+        valuePerLevel: 0.02,
+        desc: '+2% Tỉ lệ chí mạng cơ bản mỗi cấp (Tối đa +20% Crit).'
+      },
+      pickupRange: {
+        id: 'pickupRange',
+        category: 'stats',
+        name: 'Từ Trường Thu Thập',
+        icon: '🧲',
+        level: 0,
+        maxLevel: 10,
+        costs: [200, 500, 1200, 2750, 6000, 12000, 18000, 24000, 30000, 36000],
+        valuePerLevel: 0.10,
+        desc: '+10% Bán kính hút đá kinh nghiệm & vật phẩm mỗi cấp (Tối đa +100%).'
+      },
+      hpRegen: {
+        id: 'hpRegen',
+        category: 'stats',
+        name: 'Huyết Mạch Tái Tạo',
+        icon: '🌿',
+        level: 0,
+        maxLevel: 5,
+        costs: [300, 750, 1800, 4100, 9100],
+        valuePerLevel: 2, // 2 HP/s = 10 HP / 5 giây
+        desc: 'Hồi phục +10 Máu mỗi 5 giây (Tối đa 50 Máu / 5 giây, tương đương +10 HP/s).'
+      },
+      armorPercent: {
+        id: 'armorPercent',
+        category: 'stats',
+        name: 'Giáp Ma Hộ Mệnh',
+        icon: '🛡️',
+        level: 0,
+        maxLevel: 5,
+        costs: [500, 2750, 6000, 12000, 18000],
+        valuePerLevel: 0.03,
+        desc: '+3% Điểm Giáp phòng ngự cơ bản mỗi cấp (Tối đa +15% Giáp).'
+      },
+      damageReduction: {
+        id: 'damageReduction',
+        category: 'stats',
+        name: 'Hộ Thể Kiên Cường',
+        icon: '🔰',
+        level: 0,
+        maxLevel: 5,
+        costs: [500, 2750, 6000, 12000, 18000],
+        valuePerLevel: 0.02,
+        desc: '+2% Giảm sát thương nhận vào từ mọi nguồn (Tối đa +10% Giảm Dmg).'
+      },
+      specialSkillCDR: {
+        id: 'specialSkillCDR',
+        category: 'stats',
+        name: 'Nhanh Nhẹn Tuyệt Kỹ',
+        icon: '⏳',
+        level: 0,
+        maxLevel: 5,
+        costs: [500, 2750, 6000, 12000, 18000],
+        valuePerLevel: 0.03,
+        desc: 'Giảm 3% Thời gian hồi chiêu của Kỹ năng [G] mỗi cấp (Tối đa -15% CDR).'
+      },
+      bonusXP: {
+        id: 'bonusXP',
+        category: 'stats',
+        name: 'Tri Thức Thông Tuệ',
+        icon: '📖',
+        level: 0,
+        maxLevel: 10,
+        costs: [400, 1000, 2400, 5500, 12000, 20000, 30000, 40000, 50000, 60000],
+        valuePerLevel: 0.03,
+        desc: '+3% Điểm kinh nghiệm (EXP) nhận được mỗi cấp (Tối đa +30% EXP).'
+      },
+      greed: {
+        id: 'greed',
+        category: 'stats',
+        name: 'Thuật Luyện Kim',
+        icon: '🪙',
+        level: 0,
+        maxLevel: 10,
+        costs: [400, 1000, 2400, 5500, 12000, 20000, 30000, 40000, 50000, 60000],
+        valuePerLevel: 0.20,
+        desc: '+20% Tiền Vàng thu được sau mỗi trận đấu (Tối đa +200% Vàng).'
+      },
+      classSkillBuff: {
+        id: 'classSkillBuff',
+        category: 'stats',
+        name: 'Tinh Hoa Kỹ Năng Riêng',
         icon: '✨',
         level: 0,
-        maxLevel: 3,
-        baseCost: 200,
-        costMult: 1.8,
-        valuePerLevel: 0.25, // +25% Tỉ lệ rơi sách
-        desc: '+25% Tỉ lệ quái rơi Sách Khởi Đầu trong trận.'
+        maxLevel: 5,
+        costs: [2400, 5500, 12000, 15000, 20000],
+        valuePerLevel: 0.04,
+        desc: '+4% Uy lực/hiệu ứng cho 3 kỹ năng nội tại riêng của nhân vật (Tối đa +20%).'
+      },
+
+      // =========================================================================
+      // III. MỤC KHÁC & THỬ THÁCH (OTHER - 2 NÂNG CẤP)
+      // =========================================================================
+      curseEnemyCount: {
+        id: 'curseEnemyCount',
+        category: 'other',
+        name: 'Bầy Đàn Cuồng Nộ',
+        icon: '👹',
+        level: 0,
+        maxLevel: 10,
+        costs: [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000],
+        valuePerLevel: 1,
+        desc: 'Mỗi đợt xuất hiện thêm +1 quái vật mỗi cấp (Tối đa +10 quái để cày EXP/Vàng).'
+      },
+      curseEnemyDamage: {
+        id: 'curseEnemyDamage',
+        category: 'other',
+        name: 'Ác Mộng Tàn Bạo (Curse)',
+        icon: '☠️',
+        level: 0,
+        maxLevel: 10,
+        costs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        valuePerLevel: 2.0,
+        desc: 'Tăng +200% Sát thương quái vật mỗi cấp (Tối đa +2000% Dmg quái - Miễn phí 0 Vàng).'
       }
     };
 
@@ -124,7 +256,8 @@ export class MetaProgression {
         if (data.upgrades) {
           for (const key in data.upgrades) {
             if (this.upgrades[key]) {
-              this.upgrades[key].level = data.upgrades[key].level || 0;
+              const lvl = data.upgrades[key].level || 0;
+              this.upgrades[key].level = Math.min(this.upgrades[key].maxLevel, Math.max(0, lvl));
             }
           }
         }
@@ -154,7 +287,7 @@ export class MetaProgression {
   getCost(upgradeId) {
     const up = this.upgrades[upgradeId];
     if (!up || up.level >= up.maxLevel) return Infinity;
-    return Math.round(up.baseCost * Math.pow(up.costMult, up.level));
+    return up.costs[up.level];
   }
 
   buyUpgrade(upgradeId) {
@@ -170,18 +303,86 @@ export class MetaProgression {
     return false;
   }
 
+  // Lấy số tiền vàng hoàn lại cho 1 cấp vừa nâng gần nhất
+  getRefundValue(upgradeId) {
+    const up = this.upgrades[upgradeId];
+    if (!up || up.level <= 0) return 0;
+    return up.costs[up.level - 1];
+  }
+
+  // Hoàn trả 1 cấp của nâng cấp và nhận lại 100% số vàng của cấp đó
+  refundUpgrade(upgradeId) {
+    const up = this.upgrades[upgradeId];
+    if (!up || up.level <= 0) return 0;
+    const refundAmount = this.getRefundValue(upgradeId);
+    up.level--;
+    this.gold += refundAmount;
+    this.save();
+    return refundAmount;
+  }
+
+  // Tính tổng số vàng đã tiêu vào 1 nâng cấp cụ thể
+  getTotalSpentOnUpgrade(upgradeId) {
+    const up = this.upgrades[upgradeId];
+    if (!up || up.level <= 0) return 0;
+    let total = 0;
+    for (let lvl = 0; lvl < up.level; lvl++) {
+      total += up.costs[lvl];
+    }
+    return total;
+  }
+
+  // Tính tổng số vàng đã tiêu vào toàn bộ nâng cấp
+  getTotalSpent() {
+    let total = 0;
+    for (const key in this.upgrades) {
+      total += this.getTotalSpentOnUpgrade(key);
+    }
+    return total;
+  }
+
+  // Tẩy toàn bộ nâng cấp về Cấp 0 và hoàn lại 100% số vàng đã tiêu
+  resetAllUpgrades() {
+    const totalSpent = this.getTotalSpent();
+    for (const key in this.upgrades) {
+      this.upgrades[key].level = 0;
+    }
+    if (totalSpent > 0) {
+      this.gold += totalSpent;
+    }
+    this.save();
+    return totalSpent;
+  }
+
   // Lấy các chỉ số cộng thêm cho nhân vật khi bắt đầu trận
   getBonusStats() {
+    const p = this.upgrades;
     return {
-      bonusHealth: this.upgrades.health.level * this.upgrades.health.valuePerLevel,
-      bonusDamageMult: 1.0 + this.upgrades.damage.level * this.upgrades.damage.valuePerLevel,
-      bonusCritChance: this.upgrades.critChance.level * this.upgrades.critChance.valuePerLevel,
-      bonusSpeedMult: 1.0 + this.upgrades.speed.level * this.upgrades.speed.valuePerLevel,
-      goldMultiplier: 1.0 + this.upgrades.greed.level * this.upgrades.greed.valuePerLevel,
-      bonusArmor: (this.upgrades.armor ? this.upgrades.armor.level * this.upgrades.armor.valuePerLevel : 0),
-      maxBookSlots: 3 + (this.upgrades.bookSlots ? this.upgrades.bookSlots.level : 0),
-      maxStarterBooks: 1 + (this.upgrades.starterBooks ? this.upgrades.starterBooks.level : 0),
-      bookDropRateMult: 1.0 + (this.upgrades.bookDropRate ? this.upgrades.bookDropRate.level * this.upgrades.bookDropRate.valuePerLevel : 0)
+      // Passive
+      isSpecialSkillUnlocked: p.unlockSpecialSkill ? p.unlockSpecialSkill.level > 0 : false,
+      enhanceSpecialAndMain: p.enhanceSpecialAndMain ? p.enhanceSpecialAndMain.level * p.enhanceSpecialAndMain.valuePerLevel : 0,
+      bonusRerolls: p.bonusRerolls ? p.bonusRerolls.level * p.bonusRerolls.valuePerLevel : 0,
+      bonusBanishes: p.bonusBanishes ? p.bonusBanishes.level * p.bonusBanishes.valuePerLevel : 0,
+      maxBookSlots: 3 + (p.bookSlots ? p.bookSlots.level * p.bookSlots.valuePerLevel : 0),
+      maxStarterBooks: 1 + (p.starterBooks ? p.starterBooks.level * p.starterBooks.valuePerLevel : 0),
+
+      // Stats
+      healthBonusPercent: p.health ? p.health.level * p.health.valuePerLevel : 0,
+      bonusDamageMult: 1.0 + (p.damage ? p.damage.level * p.damage.valuePerLevel : 0),
+      bonusSpeedMult: 1.0 + (p.speed ? p.speed.level * p.speed.valuePerLevel : 0),
+      bonusCritChance: p.critChance ? p.critChance.level * p.critChance.valuePerLevel : 0,
+      bonusPickupRangeMult: 1.0 + (p.pickupRange ? p.pickupRange.level * p.pickupRange.valuePerLevel : 0),
+      hpRegenPerSec: p.hpRegen ? p.hpRegen.level * p.hpRegen.valuePerLevel : 0,
+      armorPercentBonus: p.armorPercent ? p.armorPercent.level * p.armorPercent.valuePerLevel : 0,
+      damageReduction: p.damageReduction ? p.damageReduction.level * p.damageReduction.valuePerLevel : 0,
+      specialSkillCDR: p.specialSkillCDR ? p.specialSkillCDR.level * p.specialSkillCDR.valuePerLevel : 0,
+      xpMultiplier: 1.0 + (p.bonusXP ? p.bonusXP.level * p.bonusXP.valuePerLevel : 0),
+      goldMultiplier: 1.0 + (p.greed ? p.greed.level * p.greed.valuePerLevel : 0),
+      classSkillBuff: p.classSkillBuff ? p.classSkillBuff.level * p.classSkillBuff.valuePerLevel : 0,
+
+      // Other / Curse
+      curseEnemyCount: p.curseEnemyCount ? p.curseEnemyCount.level * p.curseEnemyCount.valuePerLevel : 0,
+      curseEnemyDamageMult: 1.0 + (p.curseEnemyDamage ? p.curseEnemyDamage.level * p.curseEnemyDamage.valuePerLevel : 0)
     };
   }
 }

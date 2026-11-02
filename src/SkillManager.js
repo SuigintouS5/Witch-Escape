@@ -1,6 +1,7 @@
 // Quản lý Kỹ năng riêng của Nhân vật (Không chiếm ô trang bị)
 export class SkillManager {
   constructor() {
+    this.classSkillBuff = 0; // Tinh Hoa Kỹ Năng Riêng từ Shop Cổ Viện (0% - 20%)
     this.skills = {
       extraLife: {
         id: 'extraLife',
@@ -46,7 +47,8 @@ export class SkillManager {
   getDamageMultiplier() {
     let mult = 1.0;
     if (this.skills.bloodPact.unlocked) {
-      mult += 0.50;
+      const bonusBuff = 0.50 * (1.0 + (this.classSkillBuff || 0));
+      mult += bonusBuff;
     }
     return mult;
   }
@@ -65,7 +67,8 @@ export class SkillManager {
 
     this.skills.lifesteal.healTimer -= 0.05;
     if (this.skills.lifesteal.healTimer <= 0) {
-      const healAmount = Math.max(1, damage * 0.10);
+      const lifestealRate = 0.10 * (1.0 + (this.classSkillBuff || 0));
+      const healAmount = Math.max(1, damage * lifestealRate);
       player.health = Math.min(player.maxHealth, player.health + healAmount);
       this.skills.lifesteal.healTimer = this.skills.lifesteal.healCooldown;
     }
@@ -76,7 +79,7 @@ export class SkillManager {
       this.skills.extraLife.livesRemaining--;
       player.isDead = false;
 
-      let healPercent = 0.60;
+      let healPercent = 0.60 * (1.0 + (this.classSkillBuff || 0));
       let invincibility = 2.0;
 
       // Kỹ năng Tinh Hoa Thông Thạo: Thời Không Bất Diệt của Nikaido Hiro

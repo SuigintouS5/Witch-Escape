@@ -16,6 +16,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Sigmund Freud',
     work: 'Die Traumdeutung',
     tier: 'starter',
+    year: '1900',
     desc: 'Tăng +10% Tỉ lệ chí mạng (cộng trực tiếp vào cơ chế Siêu Crit).',
     buffs: { critChance: 0.10 },
     evolutionTarget: 'jung',
@@ -26,6 +27,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Plato',
     work: 'Politeia',
     tier: 'starter',
+    year: '375 BC',
     desc: 'Tăng +10% Điểm kinh nghiệm (EXP) nhận được sau tổng.',
     buffs: { expMult: 0.10 },
     evolutionTarget: 'aristoteles',
@@ -36,6 +38,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Homer',
     work: 'Odysseia',
     tier: 'starter',
+    year: '8th c. BC',
     desc: 'Tăng +8% Sát thương tổng thể toàn bộ vũ khí.',
     buffs: { dmgMult: 0.08 },
     evolutionTarget: 'virgil',
@@ -46,6 +49,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Garci Montalvo',
     work: 'Amadís de Gaula',
     tier: 'starter',
+    year: '1508',
     desc: 'Tăng +10% Máu tối đa của nhân vật sau tổng.',
     buffs: { healthMult: 0.10 },
     evolutionTarget: 'cervantes'
@@ -55,6 +59,7 @@ export const BOOK_DEFINITIONS = {
     author: 'John Milton',
     work: 'Paradise Lost',
     tier: 'starter',
+    year: '1667',
     desc: 'Tăng +20% Kích thước vũ khí và diện tích quét đòn.',
     buffs: { areaMult: 0.20 },
     evolutionTarget: 'mary_shelley',
@@ -65,6 +70,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Jacques Peuchet',
     work: 'Le Diamant et la Vengeance',
     tier: 'starter',
+    year: '1838',
     desc: 'Tăng +8% Tốc độ di chuyển nhân vật sau tổng.',
     buffs: { speedMult: 0.08 },
     evolutionTarget: 'dumas'
@@ -74,6 +80,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Ovidius',
     work: 'Metamorphoses',
     tier: 'starter',
+    year: '8 AD',
     desc: 'Tăng +15% Tiền Vàng thu được sau mỗi đợt diệt quái.',
     buffs: { goldMult: 0.15 },
     evolutionTarget: 'shakespeare'
@@ -83,6 +90,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Ferdinand de Saussure',
     work: 'Cours de linguistique générale',
     tier: 'starter',
+    year: '1916',
     desc: 'Giảm 10% Thời gian hồi chiêu tất cả vũ khí.',
     buffs: { cooldownReduction: 0.10 },
     evolutionTarget: 'foucault'
@@ -96,6 +104,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Carl Gustav Jung',
     work: 'Psychologische Typen',
     tier: 'evolved',
+    year: '1921',
     desc: 'Tăng +20% Tỉ lệ chí mạng và +10% Sát thương chí mạng.',
     buffs: { critChance: 0.20, critDamage: 0.10 }
   },
@@ -104,6 +113,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Aristoteles',
     work: 'Metaphysica',
     tier: 'evolved',
+    year: '350 BC',
     desc: 'Tăng +20% Điểm kinh nghiệm (EXP) nhận được.',
     buffs: { expMult: 0.20 },
     evolutionTarget: 'descartes',
@@ -114,6 +124,7 @@ export const BOOK_DEFINITIONS = {
     author: 'René Descartes',
     work: 'Discours de la méthode',
     tier: 'evolved',
+    year: '1637',
     desc: 'Tăng +30% Điểm kinh nghiệm (EXP) nhận được.',
     buffs: { expMult: 0.30 },
     branchTargets: ['heidegger', 'kant'],
@@ -125,6 +136,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Martin Heidegger',
     work: 'Sein und Zeit',
     tier: 'evolved',
+    year: '1927',
     desc: 'Tăng +35% EXP, +20% Vàng, +10% Chính xác.',
     buffs: { expMult: 0.35, goldMult: 0.20, accuracy: 0.10 }
   },
@@ -133,6 +145,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Immanuel Kant',
     work: 'Kritik der reinen Vernunft',
     tier: 'evolved',
+    year: '1781',
     desc: 'Tăng +40% Điểm kinh nghiệm (EXP) nhận được.',
     buffs: { expMult: 0.40 },
     branchTargets: ['hegel', 'feuerbach', 'nietzsche'],
@@ -144,6 +157,7 @@ export const BOOK_DEFINITIONS = {
     author: 'G. W. F. Hegel',
     work: 'Phänomenologie des Geistes',
     tier: 'evolved',
+    year: '1807',
     desc: 'Tăng +60% EXP, +15% Vàng, +10% Tỉ lệ chí mạng.',
     buffs: { expMult: 0.60, goldMult: 0.15, critChance: 0.10 }
   },
@@ -152,6 +166,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Ludwig Feuerbach',
     work: 'Das Wesen des Christentums',
     tier: 'evolved',
+    year: '1841',
     desc: 'Tăng +50% Vàng, +20% EXP, +20% Tỉ lệ chí mạng.',
     buffs: { goldMult: 0.50, expMult: 0.20, critChance: 0.20 }
   },
@@ -160,6 +175,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Friedrich Nietzsche',
     work: 'Zur Genealogie der Moral',
     tier: 'evolved',
+    year: '1887',
     desc: 'Tăng +40% EXP, +10% Sát thương, +10% Chính xác, +20% Crit Chance, +10% Crit Dmg.',
     buffs: { expMult: 0.40, dmgMult: 0.10, accuracy: 0.10, critChance: 0.20, critDamage: 0.10 }
   },
@@ -168,6 +184,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Virgil',
     work: 'Aeneis',
     tier: 'evolved',
+    year: '19 BC',
     desc: 'Tăng +20% Sát thương toàn bộ vũ khí.',
     buffs: { dmgMult: 0.20 },
     evolutionTarget: 'james_joyce',
@@ -179,6 +196,7 @@ export const BOOK_DEFINITIONS = {
     author: 'James Joyce',
     work: 'Ulysses',
     tier: 'evolved',
+    year: '1922',
     desc: 'Tăng +45% Dmg, +20% Xuyên giáp, +10% Crit Chance, +10% Crit Dmg, +5% Sát thương chuẩn, +5% Giảm sát thương.',
     buffs: {
       dmgMult: 0.45,
@@ -194,6 +212,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Miguel de Cervantes',
     work: 'Don Quijote',
     tier: 'evolved',
+    year: '1605',
     desc: 'Tăng +30% HP, +10% Giáp, +30% Dmg, +10% Giảm sát thương. Khi máu < 35% kích hoạt Cuồng Nộ: +40% Crit Chance, +40% Crit Dmg, +5% Hút máu (duy trì 20s, CD 120s).',
     buffs: {
       healthMult: 0.30,
@@ -208,6 +227,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Mary Shelley',
     work: 'Frankenstein',
     tier: 'evolved',
+    year: '1818',
     desc: 'Tăng +80% Kích thước vũ khí, +10% Crit Chance, +10% Tiền Vàng.',
     buffs: { areaMult: 0.80, critChance: 0.10, goldMult: 0.10 }
   },
@@ -216,6 +236,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Alexandre Dumas',
     work: 'Le Comte de Monte-Cristo',
     tier: 'evolved',
+    year: '1844',
     desc: 'Tăng +20% Tốc độ, +10% Giáp, +5% Né tránh, +10% Chính xác. Khi máu < 20% nhận +30% Máu Ảo và +20% Giảm sát thương trong 20s (CD 200s).',
     buffs: {
       speedMult: 0.20,
@@ -230,6 +251,7 @@ export const BOOK_DEFINITIONS = {
     author: 'William Shakespeare',
     work: 'Hamlet',
     tier: 'evolved',
+    year: '1601',
     desc: 'Tăng +35% Tiền Vàng nhận được, +5% Giảm sát thương.',
     buffs: { goldMult: 0.35, damageReduction: 0.05 }
   },
@@ -238,6 +260,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Michel Foucault',
     work: 'Surveiller et punir: Naissance de la prison',
     tier: 'evolved',
+    year: '1975',
     desc: 'Giảm 20% Thời gian hồi chiêu tất cả vũ khí.',
     buffs: { cooldownReduction: 0.20 }
   },
@@ -250,6 +273,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Albert Camus',
     work: "L'Étranger",
     tier: 'special',
+    year: '1942',
     desc: 'Tăng +10% Xuyên giáp, +5% Crit Chance, +10% Crit Dmg, +10% Giáp.',
     buffs: {
       armorPenPercent: 0.10,
@@ -263,6 +287,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Adam Smith',
     work: 'The Wealth of Nations',
     tier: 'special',
+    year: '1776',
     desc: 'Khai thông kinh tế: Nhân x1.2 toàn bộ số Tiền Vàng kiếm được sau trận.',
     buffs: { goldMultiplierFinal: 1.20 }
   },
@@ -271,6 +296,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Dante Alighieri',
     work: 'La Divina Commedia',
     tier: 'special',
+    year: '1320',
     desc: 'Hợp thể [Aristoteles + Virgil]: Tăng +30% Chính xác, +15% Xuyên giáp, +20% Dmg, +20% Crit Chance.',
     buffs: {
       accuracy: 0.30,
@@ -285,6 +311,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Herman Melville',
     work: 'Moby-Dick',
     tier: 'special',
+    year: '1851',
     desc: 'Hợp thể [Plato + Shakespeare]: Tăng +40% Máu tối đa, +20% Phản đòn sát thương, +10% Giáp.',
     buffs: {
       healthMult: 0.40,
@@ -298,6 +325,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Fyodor Dostoyevsky',
     work: 'Преступление и наказание',
     tier: 'special',
+    year: '1866',
     desc: 'Hợp thể [Shakespeare + Kant]: Tăng +15% Hút máu, +20% Crit Chance, +10% Giáp, +20% Kích thước vũ khí, -5% Cooldown.',
     buffs: {
       lifesteal: 0.15,
@@ -313,6 +341,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Jean-Paul Sartre',
     work: 'Huis clos',
     tier: 'special',
+    year: '1944',
     desc: 'Tự do hiện sinh toàn năng: +10% Xuyên giáp, +10% EXP, +10% Vàng, +10% Chính xác, +5% Né, +5% Phản đòn, +5% Sát thương chuẩn, +5% Tốc chạy, +5% Hút máu, +10% Crit Chance, +10% Crit Dmg, +10% Kích thước, -5% Cooldown.',
     buffs: {
       armorPenPercent: 0.10,
@@ -335,6 +364,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Franz Kafka',
     work: 'Die Verwandlung',
     tier: 'special',
+    year: '1915',
     desc: 'Hợp thể [Nietzsche + Dostoyevsky]: +30% Size, +10% Giáp, +10% Hút máu, +15% Dmg, +20% HP, +30% Crit. Không nhận sát thương tăng +1% Crit Chance mỗi giây vô tận (dính đòn trừ 20% stack); máu < 20% tàng hình miễn nhiễm 10s (CD 150s).',
     buffs: {
       areaMult: 0.30,
@@ -352,6 +382,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Victor Hugo',
     work: 'Les Misérables',
     tier: 'special',
+    year: '1862',
     desc: 'Hợp thể [Shakespeare + Dumas]: Chuyển 50% Sát thương gây ra thành Sát Thương Chuẩn; mỗi 30s phóng sóng xung kích làm chậm quái 30% trong 5s; +20% Chính xác, +20% Crit Chance.',
     buffs: {
       trueDmgRatio: 0.50,
@@ -366,6 +397,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Neil Postman',
     work: 'Amusing Ourselves to Death',
     tier: 'special',
+    year: '1985',
     desc: 'Hợp thể [Camus + Mary Shelley + Jung]: +40% Chính xác, +30% Thời gian DOT, +30% Dmg DOT, DOT có thể nổ Chí Mạng, 20% đòn đánh đốt cháy quái, +30% Size, -20% Cooldown, +20% Tốc chạy, +10% Xuyên giáp.',
     buffs: {
       accuracy: 0.40,
@@ -385,6 +417,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Jacques Lacan',
     work: 'Écrits',
     tier: 'special',
+    year: '1966',
     desc: 'Hợp thể [Hegel + Saussure + Freud]: 50% Sát thương chuẩn, -20% Cooldown, +50% Dmg, +50% HP, +5% Giảm sát thương, +50% Crit Chance, +100% Crit Dmg, +30% Chính xác, +5% Né, +10% Phản đòn, +10% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, +50% Vàng, +10% Score/quái.',
     buffs: {
       trueDmgRatio: 0.50,
@@ -412,6 +445,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Jacques Derrida',
     work: 'De la grammatologie',
     tier: 'special',
+    year: '1967',
     desc: 'Hợp thể [Heidegger + Saussure + Hegel]: 60% Sát thương chuẩn, -30% Cooldown, +60% Dmg, +60% HP, +60% Giáp, +10% Giảm sát thương, +60% Crit Chance, +120% Crit Dmg, +30% Chính xác, +5% Né, +10% Phản đòn, +10% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, +50% Vàng, +15% Score/quái.',
     buffs: {
       trueDmgRatio: 0.60,
@@ -440,6 +474,7 @@ export const BOOK_DEFINITIONS = {
     author: 'Karl Marx & Friedrich Engels',
     work: 'Manifest der Kommunistischen Partei',
     tier: 'special',
+    year: '1848',
     desc: 'Đỉnh cao tối thượng [Hegel + Feuerbach + Adam Smith]: 80% Sát thương chuẩn, -50% Cooldown, +75% Dmg, +75% HP, +75% Giáp, +15% Giảm sát thương, +75% Crit Chance, +150% Crit Dmg, +40% Chính xác, +5% Né, +10% Phản đòn, +15% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, x1.4 Tiền Vàng, +20% Score/quái.',
     buffs: {
       trueDmgRatio: 0.80,
@@ -1118,8 +1153,8 @@ export class BookSystem {
       ctx.fillRect(x, y, 4, h);
     }
 
-    // 4. Khung vuông thanh mảnh bao quanh bên trong bìa sách (Margin 10px)
-    const innerMargin = 10;
+    // 4. Khung vuông thanh mảnh bao quanh bên trong bìa sách
+    const innerMargin = Math.max(8, Math.round(w * 0.065));
     const innerX = x + innerMargin;
     const innerY = y + innerMargin;
     const innerW = w - innerMargin * 2;
@@ -1129,19 +1164,21 @@ export class BookSystem {
     ctx.lineWidth = 1.0;
     ctx.strokeRect(innerX, innerY, innerW, innerH);
 
-    // 5. In duy nhất Tên Tác Phẩm nguyên bản bên trong khung
+    // 5. In Tên Tác Phẩm nguyên bản và Năm xuất bản bên trong khung
     ctx.fillStyle = '#1c1917';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Điều chỉnh font size vừa vặn với chiều dài tựa sách
+    // Tự động scale font theo kích thước thẻ
+    const scaleFactor = w / 144;
     const titleLength = def.work.length;
-    let fontSize = 16;
-    if (titleLength > 30) fontSize = 12;
-    else if (titleLength > 20) fontSize = 13.5;
-    else if (titleLength > 12) fontSize = 15;
-    else fontSize = 17;
+    let baseFontSize = 16;
+    if (titleLength > 30) baseFontSize = 12;
+    else if (titleLength > 20) baseFontSize = 13.5;
+    else if (titleLength > 12) baseFontSize = 15;
+    else baseFontSize = 17;
 
+    const fontSize = Math.max(12, Math.round(baseFontSize * scaleFactor));
     ctx.font = `bold ${fontSize}px "Playfair Display", Georgia, "Times New Roman", serif`;
 
     // Wrap dòng cho tên tác phẩm nếu dài
@@ -1149,11 +1186,11 @@ export class BookSystem {
     const lines = [];
     let currentLine = '';
 
-    for (const w of words) {
-      const testLine = currentLine ? `${currentLine} ${w}` : w;
+    for (const wWord of words) {
+      const testLine = currentLine ? `${currentLine} ${wWord}` : wWord;
       if (ctx.measureText(testLine).width > innerW - 14) {
         if (currentLine) lines.push(currentLine);
-        currentLine = w;
+        currentLine = wWord;
       } else {
         currentLine = testLine;
       }
@@ -1162,11 +1199,22 @@ export class BookSystem {
 
     const lineHeight = fontSize * 1.35;
     const totalTextH = lines.length * lineHeight;
-    let startTextY = innerY + innerH / 2 - totalTextH / 2 + lineHeight / 2;
+    const bottomSpace = def.year ? Math.round(28 * scaleFactor) : 0;
+    let startTextY = innerY + (innerH - bottomSpace) / 2 - totalTextH / 2 + lineHeight / 2;
 
     for (const line of lines) {
       ctx.fillText(line, innerX + innerW / 2, startTextY);
       startTextY += lineHeight;
+    }
+
+    // 6. In Năm ra mắt tác phẩm ở đáy bìa (nếu có)
+    if (def.year) {
+      ctx.fillStyle = '#78716c';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      const yearFontSize = Math.max(11, Math.round(12.5 * scaleFactor));
+      ctx.font = `bold ${yearFontSize}px "Nunito", "Playfair Display", monospace`;
+      ctx.fillText(def.year, innerX + innerW / 2, innerY + innerH - Math.max(6, Math.round(8 * scaleFactor)));
     }
 
     ctx.restore();

@@ -140,10 +140,16 @@ class Game {
     this.shopToast = null;
 
     // Lắng nghe sự kiện
+    this.canvas.setAttribute('tabindex', '0');
+    this.canvas.focus();
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+
+    // Tự động căn chỉnh & dãn giao diện theo đúng độ phân giải màn hình
+    this.resizeCanvas();
+    window.addEventListener('resize', () => this.resizeCanvas());
 
     // Vòng lặp chính
     this.lastTime = performance.now();
@@ -152,6 +158,32 @@ class Game {
     this.lastFpsUpdate = performance.now();
 
     requestAnimationFrame((t) => this.loop(t));
+  }
+
+  // Tự động căn chỉnh kích thước canvas không biến dạng và mở rộng tầm nhìn theo đúng tỷ lệ màn hình
+  resizeCanvas() {
+    const baseW = 1920;
+    const baseH = 1080;
+    const w = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : baseW;
+    const h = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : baseH;
+    const aspect = w / h;
+
+    if (aspect >= baseW / baseH) {
+      this.canvas.height = baseH;
+      this.canvas.width = Math.round(baseH * aspect);
+    } else {
+      this.canvas.width = baseW;
+      this.canvas.height = Math.round(baseW / aspect);
+    }
+
+    if (this.camera) {
+      this.camera.viewportWidth = this.canvas.width;
+      this.camera.viewportHeight = this.canvas.height;
+    }
+
+    if (this.pauseBtnRect) {
+      this.pauseBtnRect.x = this.canvas.width - 200;
+    }
   }
 
   initGame(starterBookIds = null) {
@@ -182,6 +214,13 @@ class Game {
     );
 
     this.skillManager = new SkillManager();
+    this.skillManager.classSkillBuff = metaBonuses.classSkillBuff || 0;
+
+    // Reroll & Banish riêng cho từng trận (dùng là mất)
+    this.rerollCount = metaBonuses.bonusRerolls || 0;
+    this.banishCount = metaBonuses.bonusBanishes || 0;
+    this.banishedItemIds = new Set();
+    this.isBanishModeActive = false;
 
     // Khởi tạo Vũ khí khởi đầu theo nhân vật
     const startWeaponId = this.selectedChar.startingWeaponId || 'main_sword';
@@ -189,8 +228,9 @@ class Game {
     this.upgradeManager = new UpgradeManager(this.weaponManager, this.skillManager);
     this.upgradeManager.applyChallenges(this.selectedChallenges);
 
-    // Cập nhật độ khó & chế độ & thử thách cho Spawner
+    // Cập nhật độ khó & chế độ & thử thách & nguyền rủa cho Spawner
     this.spawner.setDifficulty(this.selectedDiff, this.selectedMode.id, this.selectedChallenges);
+    this.spawner.curseEnemyCount = metaBonuses.curseEnemyCount || 0;
 
     this.enemies = [];
     this.enemyProjectiles = [];
@@ -297,7 +337,10 @@ class Game {
           maxHealth: this.player.maxHealth
         },
         equipped: this.upgradeManager.getEquippedData(),
-        skills: this.skillManager.getSkillsData()
+        skills: this.skillManager.getSkillsData(),
+        rerollCount: this.rerollCount || 0,
+        banishCount: this.banishCount || 0,
+        banishedItemIds: Array.from(this.banishedItemIds || [])
       };
       localStorage.setItem('vampire_saved_run', JSON.stringify(saveData));
     } catch (e) {
@@ -350,7 +393,14 @@ class Game {
     this.player.maxHealth = data.player.maxHealth;
 
     this.skillManager = new SkillManager();
+    this.skillManager.classSkillBuff = metaBonuses.classSkillBuff || 0;
     this.skillManager.restoreSkillsData(data.skills);
+
+    // Khôi phục Reroll & Banish của trận
+    this.rerollCount = data.rerollCount !== undefined ? data.rerollCount : (metaBonuses.bonusRerolls || 0);
+    this.banishCount = data.banishCount !== undefined ? data.banishCount : (metaBonuses.bonusBanishes || 0);
+    this.banishedItemIds = new Set(data.banishedItemIds || []);
+    this.isBanishModeActive = false;
 
     const startWeaponId = this.selectedChar.startingWeaponId || 'main_sword';
     this.weaponManager = new WeaponManager(startWeaponId);
@@ -363,6 +413,7 @@ class Game {
     }
 
     this.spawner.setDifficulty(this.selectedDiff, this.selectedMode.id, this.selectedChallenges);
+    this.spawner.curseEnemyCount = metaBonuses.curseEnemyCount || 0;
 
     this.gameTime = data.gameTime;
     this.killCount = data.killCount;
@@ -495,12 +546,43 @@ class Game {
   triggerLevelUp() {
     this.input.resetKeys();
     this.isLevelUpOpen = true;
-    this.currentChoices = this.upgradeManager.generateChoices();
+    this.isBanishModeActive = false;
+    this.currentChoices = this.upgradeManager.generateChoices(this.player, this.banishedItemIds);
   }
 
   triggerEvolution() {
     this.input.resetKeys();
     this.isEvolutionOpen = true;
+  }
+
+  // Kích hoạt kỹ năng đặc biệt của nhân vật (Phím G hoặc click)
+  activateSpecialSkill() {
+    if (!this.player || this.player.isDead) return;
+    if (this.isPaused || this.isLevelUpOpen || this.isEvolutionOpen) return;
+
+    const skill = this.player.specialSkill;
+    if (!skill) return;
+
+    if (!skill.isUnlocked) {
+      this.showGameToast('🔒 Kỹ năng [G] chưa mở khóa! Hãy mua tại Cổ Viện Ma Pháp.', '#ef4444');
+      return;
+    }
+
+    if (skill.cooldown > 0) {
+      this.showGameToast(`⏳ Kỹ năng [G] đang hồi chiêu (${skill.cooldown.toFixed(1)}s)!`, '#f59e0b');
+      return;
+    }
+
+    // Tạm thời để trống hiệu ứng theo yêu cầu người chơi
+    skill.cooldown = skill.maxCooldown || 8.0;
+
+    // Hiệu ứng phản hồi ma thuật xung quanh nhân vật
+    if (this.particles) {
+      this.particles.createArcaneBlast(this.player.x, this.player.y, 1.8);
+      this.particles.createDeathBurst(this.player.x, this.player.y, '#38bdf8', 40);
+    }
+
+    this.showGameToast('⚡ KỸ NĂNG ĐẶC BIỆT [G]: Đang để trống (Chờ thiết lập hiệu ứng)!', '#38bdf8');
   }
 
   toggleFullscreen() {
@@ -519,6 +601,14 @@ class Game {
     if (e.key === 'f' || e.key === 'F') {
       this.toggleFullscreen();
       return;
+    }
+
+    // Phím [G]: Kích hoạt Kỹ năng đặc biệt của nhân vật
+    if (e.key === 'g' || e.key === 'G') {
+      if (this.gameState === 'PLAYING' && !this.isPaused && !this.isLevelUpOpen && !this.isEvolutionOpen) {
+        this.activateSpecialSkill();
+        return;
+      }
     }
 
     if (e.key === 'Escape' && this.isSettingOpen) {
@@ -593,30 +683,11 @@ class Game {
     }
   }
 
-  // Tính toán tọa độ chuột trên canvas chuẩn xác 100%, khử hoàn toàn lệch do letterbox/aspect-ratio
+  // Tính toán tọa độ chuột trên canvas chuẩn xác 100%, dãn hết trình duyệt không chừa khoảng trống
   getCanvasMousePos(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const canvasAspect = this.canvas.width / this.canvas.height; // 1920 / 1080 = 16:9
-    const elemAspect = rect.width / rect.height;
-
-    let drawW = rect.width;
-    let drawH = rect.height;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (elemAspect > canvasAspect) {
-      // Màn hình rộng hơn 16:9 (vệt đen 2 bên trái/phải)
-      drawW = rect.height * canvasAspect;
-      offsetX = (rect.width - drawW) / 2;
-    } else {
-      // Màn hình cao hơn 16:9 (vệt đen trên/dưới)
-      drawH = rect.width / canvasAspect;
-      offsetY = (rect.height - drawH) / 2;
-    }
-
-    const mouseX = ((e.clientX - rect.left - offsetX) / drawW) * this.canvas.width;
-    const mouseY = ((e.clientY - rect.top - offsetY) / drawH) * this.canvas.height;
-
+    const mouseX = ((e.clientX - rect.left) / (rect.width || 1)) * this.canvas.width;
+    const mouseY = ((e.clientY - rect.top) / (rect.height || 1)) * this.canvas.height;
     return { mouseX, mouseY };
   }
 
@@ -628,7 +699,8 @@ class Game {
     const { mouseX, mouseY } = this.getCanvasMousePos(e);
 
     let hovering = false;
-    for (const btn of this.menuButtons) {
+    for (let i = this.menuButtons.length - 1; i >= 0; i--) {
+      const btn = this.menuButtons[i];
       if (
         mouseX >= btn.x && mouseX <= btn.x + btn.w &&
         mouseY >= btn.y && mouseY <= btn.y + btn.h
@@ -656,6 +728,14 @@ class Game {
     if (this.gameState === 'CODEX') {
       e.preventDefault();
       this.codexScrollY = Math.max(0, Math.min(2200, this.codexScrollY + (e.deltaY > 0 ? 140 : -140)));
+    } else if (this.gameState === 'SHOP') {
+      e.preventDefault();
+      const maxScroll = this.maxShopScrollY || 600;
+      this.shopScrollY = Math.max(0, Math.min(maxScroll, (this.shopScrollY || 0) + (e.deltaY > 0 ? 90 : -90)));
+    } else if (this.gameState === 'BOOK_SELECT') {
+      e.preventDefault();
+      const maxScroll = this.starterBookMaxScrollX || 0;
+      this.starterBookTargetScrollX = Math.max(0, Math.min(maxScroll, (this.starterBookTargetScrollX || 0) + (e.deltaY > 0 ? 240 : -240)));
     }
   }
 
@@ -729,6 +809,7 @@ class Game {
 
   onPointerDown(e) {
     if (e.button !== 0) return; // Chỉ nhận chuột trái
+    if (this.canvas) this.canvas.focus();
     if (this.audioManager) this.audioManager.unlockAudio();
     const { mouseX, mouseY } = this.getCanvasMousePos(e);
 
@@ -760,7 +841,8 @@ class Game {
         return; // Đang mở modal thì không kích hoạt các nút phía sau
       }
 
-      for (const btn of this.menuButtons) {
+      for (let i = this.menuButtons.length - 1; i >= 0; i--) {
+        const btn = this.menuButtons[i];
         if (
           mouseX >= btn.x && mouseX <= btn.x + btn.w &&
           mouseY >= btn.y && mouseY <= btn.y + btn.h
@@ -829,6 +911,41 @@ class Game {
     }
 
     if (this.isLevelUpOpen) {
+      // 1. Nút Đổi Lại (Reroll)
+      if (
+        this.rerollBtnRect &&
+        mouseX >= this.rerollBtnRect.x && mouseX <= this.rerollBtnRect.x + this.rerollBtnRect.w &&
+        mouseY >= this.rerollBtnRect.y && mouseY <= this.rerollBtnRect.y + this.rerollBtnRect.h
+      ) {
+        if ((this.rerollCount || 0) > 0) {
+          this.rerollCount--;
+          this.isBanishModeActive = false;
+          this.currentChoices = this.upgradeManager.generateChoices(this.player, this.banishedItemIds);
+          this.showGameToast(`🎲 Đã đổi lại danh sách nâng cấp! (Còn ${this.rerollCount} lần)`, '#38bdf8');
+        } else {
+          this.showGameToast('⚠️ Bạn đã dùng hết lượt Đổi Lại (Reroll) trong trận này!', '#f59e0b');
+        }
+        return;
+      }
+
+      // 2. Nút Loại Bỏ (Banish Toggle)
+      if (
+        this.banishBtnRect &&
+        mouseX >= this.banishBtnRect.x && mouseX <= this.banishBtnRect.x + this.banishBtnRect.w &&
+        mouseY >= this.banishBtnRect.y && mouseY <= this.banishBtnRect.y + this.banishBtnRect.h
+      ) {
+        if ((this.banishCount || 0) > 0) {
+          this.isBanishModeActive = !this.isBanishModeActive;
+          if (this.isBanishModeActive) {
+            this.showGameToast('🚫 Hãy bấm vào thẻ nâng cấp bạn muốn LOẠI BỎ KHỎI TRẬN!', '#ef4444');
+          }
+        } else {
+          this.showGameToast('⚠️ Bạn đã dùng hết lượt Loại Bỏ (Banish) trong trận này!', '#f59e0b');
+        }
+        return;
+      }
+
+      // 3. Chọn thẻ bài (hoặc Loại Bỏ thẻ bài)
       for (let i = 0; i < this.choiceCardsRects.length; i++) {
         const r = this.choiceCardsRects[i];
         if (
@@ -836,6 +953,19 @@ class Game {
           mouseY >= r.y && mouseY <= r.y + r.h
         ) {
           const selected = this.currentChoices[i];
+
+          // Nếu đang ở Chế độ Loại Bỏ (Banish)
+          if (this.isBanishModeActive) {
+            this.banishedItemIds.add(selected.id);
+            this.banishCount--;
+            this.isBanishModeActive = false;
+            this.showGameToast(`🚫 Đã loại bỏ "${selected.name}" khỏi toàn bộ trận đấu! (Còn ${this.banishCount} lần)`, '#ef4444');
+            // Sinh lại danh sách mới thay thế
+            this.currentChoices = this.upgradeManager.generateChoices(this.player, this.banishedItemIds);
+            return;
+          }
+
+          // Chế độ nhận nâng cấp thông thường
           this.upgradeManager.applyChoice(selected, this.player);
           this.isLevelUpOpen = false;
 
@@ -878,6 +1008,16 @@ class Game {
       mouseY >= btn.y && mouseY <= btn.y + btn.h
     ) {
       this.togglePause();
+      return;
+    }
+
+    // Nhấp vào nút Kỹ năng đặc biệt [G] trên HUD
+    if (
+      this.specialSkillBtnRect &&
+      mouseX >= this.specialSkillBtnRect.x && mouseX <= this.specialSkillBtnRect.x + this.specialSkillBtnRect.w &&
+      mouseY >= this.specialSkillBtnRect.y && mouseY <= this.specialSkillBtnRect.y + this.specialSkillBtnRect.h
+    ) {
+      this.activateSpecialSkill();
       return;
     }
 
@@ -996,6 +1136,8 @@ class Game {
       this.gameState = 'CHAR_SELECT';
     } else if (actionId === 'open_shop') {
       this.gameState = 'SHOP';
+      this.shopCategoryFilter = 'passive';
+      this.shopScrollY = 0;
     } else if (actionId === 'open_skill_tree') {
       this.skillTreeSelectedCharId = this.selectedChar ? this.selectedChar.id : 'sorceress';
       this.gameState = 'SKILL_TREE';
@@ -1069,11 +1211,25 @@ class Game {
     } else if (actionId === 'how_to_play') {
       alert('🎮 HƯỚNG DẪN CHƠI:\n- Di chuyển: Phím W, A, S, D hoặc Mũi tên\n- Tấn công: Tự động 100%\n- Nhặt Đá Kinh Nghiệm để thăng cấp và chọn vũ khí\n- Khi có 2 vũ khí Max Cấp 7, Lõi Tiến Hóa sẽ rơi xuống để Hợp Nhất Vũ Khí Tối Thượng!\n- Tiêu diệt quái kiếm Vàng để Nâng Cấp Vĩnh Viễn tại Cổ Viện Ma Pháp.');
     } else if (actionId.startsWith('select_char_')) {
-      if (btnData.charData) this.selectedChar = btnData.charData;
+      if (btnData.charData) {
+        if (this.selectedChar && this.selectedChar.id === btnData.charData.id) {
+          // Nhấp lại vào anh hùng đã chọn -> Tiến ngay sang chọn Chế độ
+          this.gameState = 'MODE_SELECT';
+        } else {
+          this.selectedChar = btnData.charData;
+        }
+      }
     } else if (actionId === 'goto_mode_select') {
       this.gameState = 'MODE_SELECT';
     } else if (actionId.startsWith('select_mode_')) {
-      if (btnData.modeData) this.selectedMode = btnData.modeData;
+      if (btnData.modeData) {
+        if (this.selectedMode && this.selectedMode.id === btnData.modeData.id) {
+          // Nhấp lại vào chế độ đã chọn -> Tiến ngay sang chọn Thử thách
+          this.gameState = 'CHALLENGE_SELECT';
+        } else {
+          this.selectedMode = btnData.modeData;
+        }
+      }
     } else if (actionId === 'goto_challenge_select') {
       this.gameState = 'CHALLENGE_SELECT';
     } else if (actionId.startsWith('toggle_challenge_')) {
@@ -1082,7 +1238,14 @@ class Game {
     } else if (actionId === 'goto_diff_select') {
       this.gameState = 'DIFF_SELECT';
     } else if (actionId.startsWith('select_diff_')) {
-      if (btnData.diffData) this.selectedDiff = btnData.diffData;
+      if (btnData.diffData) {
+        if (this.selectedDiff && this.selectedDiff.id === btnData.diffData.id) {
+          // Nhấp lại vào độ khó đã chọn -> Tiến ngay sang chọn Sách khởi đầu
+          this.gameState = 'BOOK_SELECT';
+        } else {
+          this.selectedDiff = btnData.diffData;
+        }
+      }
     } else if (actionId === 'start_battle_now') {
       this.initGame();
     } else if (actionId === 'goto_book_select') {
@@ -1104,6 +1267,13 @@ class Game {
           this.selectedStarterBookIds.push(bookId);
         }
       }
+    } else if (actionId === 'prev_starter_book') {
+      const step = this.starterBookCardStep || 468;
+      this.starterBookTargetScrollX = Math.max(0, (this.starterBookTargetScrollX || 0) - step);
+    } else if (actionId === 'next_starter_book') {
+      const step = this.starterBookCardStep || 468;
+      const maxScroll = this.starterBookMaxScrollX || 0;
+      this.starterBookTargetScrollX = Math.min(maxScroll, (this.starterBookTargetScrollX || 0) + step);
     } else if (actionId === 'start_battle_from_books') {
       this.initGame(this.selectedStarterBookIds);
     } else if (actionId === 'clear_starter_books') {
@@ -1122,9 +1292,10 @@ class Game {
     } else if (actionId.startsWith('filter_codex_')) {
       this.codexFilter = actionId.replace('filter_codex_', '');
     } else if (actionId === 'codex_scroll_up') {
-      this.codexScrollY = Math.max(0, this.codexScrollY - 220);
+      this.codexScrollY = Math.max(0, (this.codexScrollY || 0) - 260);
     } else if (actionId === 'codex_scroll_down') {
-      this.codexScrollY = Math.min(2200, this.codexScrollY + 220);
+      const maxScroll = this.codexMaxScrollY || 1500;
+      this.codexScrollY = Math.min(maxScroll, (this.codexScrollY || 0) + 260);
     } else if (actionId === 'back_to_menu') {
       this.gameState = 'MAIN_MENU';
       if (this.audioManager) this.audioManager.playMenuMusic();
@@ -1138,6 +1309,28 @@ class Game {
       this.meta.gold = (this.meta.gold || 0) + 1000;
       this.meta.save();
       this.showShopToast('🎁 Đã nhận +1,000 Tiền Vàng thử nghiệm!', '#ffd700');
+    } else if (actionId.startsWith('shop_tab_')) {
+      this.shopCategoryFilter = actionId.replace('shop_tab_', '');
+      this.shopScrollY = 0;
+    } else if (actionId === 'reset_all_upgrades') {
+      const refunded = this.meta.resetAllUpgrades();
+      if (refunded > 0) {
+        this.showShopToast(`♻️ Đã tẩy toàn bộ nâng cấp! Hoàn lại +${refunded.toLocaleString()} Tiền Vàng (100%).`, '#38bdf8');
+      } else {
+        this.showShopToast('ℹ️ Chưa có nâng cấp nào được mua để hoàn vàng!', '#f59e0b');
+      }
+    } else if (actionId.startsWith('refund_upgrade_')) {
+      const upId = actionId.replace('refund_upgrade_', '');
+      const up = this.meta.upgrades[upId];
+      if (!up || up.level <= 0) {
+        this.showShopToast('ℹ️ Nâng cấp này đang ở Cấp 0, không thể hoàn!', '#f59e0b');
+        return;
+      }
+      const refVal = this.meta.getRefundValue(upId);
+      const refunded = this.meta.refundUpgrade(upId);
+      if (refunded > 0) {
+        this.showShopToast(`↩️ Đã hoàn 1 cấp ${up.name}! Nhận lại +${refunded.toLocaleString()} Vàng (100%).`, '#fbbf24');
+      }
     } else if (actionId.startsWith('buy_upgrade_')) {
       const upId = actionId.replace('buy_upgrade_', '');
       const up = this.meta.upgrades[upId];
@@ -1399,7 +1592,7 @@ class Game {
         } else if (enemy.isMainBoss) {
           enemy.update(delta, this.player, this.enemies, onEnemyShoot, this.particles);
         } else {
-          enemy.update(delta, this.player, this.enemies, onEnemyShoot);
+          enemy.update(delta, this.player, this.enemies, onEnemyShoot, this.particles);
         }
 
         const dist = Math.hypot(enemy.x - this.player.x, enemy.y - this.player.y);
@@ -1852,13 +2045,14 @@ class Game {
     const slotSize = 36;
     let curX = hpBarX;
 
-    // 5 Ô TẤN CÔNG (Màu Đỏ/Hồng - Tăng thêm 1 ô)
+    // 5 Ô TẤN CÔNG (Màu Đỏ/Hồng - Slot 1 là Vũ Khí Chính Độc Nhất viền vàng)
     for (let i = 0; i < 5; i++) {
       const w = this.upgradeManager.attackSlots[i];
-      this.ctx.fillStyle = w ? '#3a121d' : 'rgba(25, 20, 25, 0.75)';
+      const isMain = w && (w.isMainWeapon || i === 0);
+      this.ctx.fillStyle = w ? (isMain ? '#4a1525' : '#3a121d') : 'rgba(25, 20, 25, 0.75)';
       this.ctx.fillRect(curX, slotStartY, slotSize, slotSize);
-      this.ctx.strokeStyle = w ? '#ff4d6d' : '#443344';
-      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeStyle = w ? (isMain ? '#ffd700' : '#ff4d6d') : '#443344';
+      this.ctx.lineWidth = isMain ? 2.5 : 1.5;
       this.ctx.strokeRect(curX, slotStartY, slotSize, slotSize);
 
       if (w && w.icon) {
@@ -1866,10 +2060,17 @@ class Game {
         if (iconImg && iconImg.complete) {
           this.ctx.drawImage(iconImg, curX + 2, slotStartY + 2, slotSize - 4, slotSize - 4);
         }
+        // Biểu tượng vương miện nhỏ nếu là Vũ khí Chính Độc Nhất
+        if (isMain) {
+          this.ctx.fillStyle = '#ffd700';
+          this.ctx.font = '10px sans-serif';
+          this.ctx.textAlign = 'left';
+          this.ctx.fillText('👑', curX + 1, slotStartY + 10);
+        }
         // Huy hiệu cấp độ nhỏ ở góc dưới
-        this.ctx.fillStyle = '#ff4d6d';
+        this.ctx.fillStyle = isMain ? '#ffd700' : '#ff4d6d';
         this.ctx.fillRect(curX + slotSize - 13, slotStartY + slotSize - 13, 13, 13);
-        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillStyle = isMain ? '#000000' : '#ffffff';
         this.ctx.font = 'bold 11px monospace';
         this.ctx.textAlign = 'center';
         this.ctx.fillText(w.level, curX + slotSize - 6, slotStartY + slotSize - 3);
@@ -2154,6 +2355,104 @@ class Game {
       this.ctx.restore();
     }
 
+    // --- NÚT KỸ NĂNG ĐẶC BIỆT RIÊNG CỦA NHÂN VẬT [PHÍM G] ---
+    if (this.player && this.player.specialSkill) {
+      const skill = this.player.specialSkill;
+      const btnSize = 78;
+      const btnX = Math.round(this.canvas.width / 2 - btnSize / 2);
+      const btnY = this.canvas.height - btnSize - 24;
+      this.specialSkillBtnRect = { x: btnX, y: btnY, w: btnSize, h: btnSize };
+
+      const isUnlocked = !!skill.isUnlocked;
+      const isOnCooldown = isUnlocked && skill.cooldown > 0;
+      const cdRatio = isOnCooldown ? (skill.cooldown / (skill.maxCooldown || 8.0)) : 0;
+
+      // Hào quang nền phía sau khi sẵn sàng
+      if (isUnlocked && !isOnCooldown) {
+        this.ctx.save();
+        this.ctx.shadowColor = '#38bdf8';
+        this.ctx.shadowBlur = 16;
+        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+        this.ctx.beginPath();
+        this.ctx.arc(btnX + btnSize / 2, btnY + btnSize / 2, btnSize / 2 + 4, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+      }
+
+      // Khung nút
+      this.ctx.fillStyle = !isUnlocked ? 'rgba(10, 12, 18, 0.92)' : (isOnCooldown ? 'rgba(15, 20, 32, 0.90)' : 'rgba(20, 30, 50, 0.94)');
+      this.ctx.fillRect(btnX, btnY, btnSize, btnSize);
+
+      // Viền ma thuật
+      this.ctx.strokeStyle = !isUnlocked ? '#334155' : (isOnCooldown ? '#475569' : '#38bdf8');
+      this.ctx.lineWidth = (!isUnlocked || isOnCooldown) ? 1.8 : 2.5;
+      this.ctx.strokeRect(btnX, btnY, btnSize, btnSize);
+
+      // Khung viền chỉ ma pháp bên trong
+      this.ctx.strokeStyle = !isUnlocked ? 'rgba(255, 255, 255, 0.04)' : (isOnCooldown ? 'rgba(255, 255, 255, 0.08)' : 'rgba(56, 189, 248, 0.35)');
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(btnX + 3, btnY + 3, btnSize - 6, btnSize - 6);
+
+      if (!isUnlocked) {
+        // Biểu tượng Khóa nếu chưa nâng cấp tại Cổ Viện
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = 'bold 26px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('🔒', btnX + btnSize / 2, btnY + 34);
+
+        this.ctx.fillStyle = '#ef4444';
+        this.ctx.font = 'bold 10px "Segoe UI", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('KHÓA', btnX + btnSize / 2, btnY + 50);
+      } else {
+        // Biểu tượng icon kỹ năng (Tia sét ma pháp)
+        this.ctx.fillStyle = isOnCooldown ? '#64748b' : '#38bdf8';
+        this.ctx.font = 'bold 26px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('⚡', btnX + btnSize / 2, btnY + 34);
+
+        // Nhãn "(Trống)"
+        this.ctx.fillStyle = isOnCooldown ? '#64748b' : '#94a3b8';
+        this.ctx.font = 'italic 11px "Segoe UI", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('(Trống)', btnX + btnSize / 2, btnY + 50);
+
+        // Phủ bóng Cooldown (nếu đang hồi chiêu)
+        if (isOnCooldown) {
+          const cdH = Math.round((btnSize - 6) * cdRatio);
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.70)';
+          this.ctx.fillRect(btnX + 3, btnY + btnSize - 3 - cdH, btnSize - 6, cdH);
+
+          // Số giây hồi chiêu còn lại
+          this.ctx.fillStyle = '#fbbf24';
+          this.ctx.font = 'bold 15px monospace';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText(`${skill.cooldown.toFixed(1)}s`, btnX + btnSize / 2, btnY + 44);
+        }
+      }
+
+      // Huy hiệu phím tắt [G] ở góc trên phải
+      const badgeW = 24;
+      const badgeH = 18;
+      const badgeX = btnX + btnSize - badgeW + 3;
+      const badgeY = btnY - 5;
+      this.ctx.fillStyle = !isUnlocked ? '#1e293b' : (isOnCooldown ? '#334155' : '#0284c7');
+      this.ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+      this.ctx.strokeStyle = !isUnlocked ? '#334155' : (isOnCooldown ? '#64748b' : '#bae6fd');
+      this.ctx.lineWidth = 1.2;
+      this.ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+      this.ctx.fillStyle = !isUnlocked ? '#64748b' : '#ffffff';
+      this.ctx.font = 'bold 11px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('G', badgeX + badgeW / 2, badgeY + 13);
+
+      // Nhãn chữ nhỏ phía dưới nút
+      this.ctx.fillStyle = !isUnlocked ? '#64748b' : (isOnCooldown ? '#94a3b8' : '#cbd5e1');
+      this.ctx.font = 'bold 11px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(isUnlocked ? 'KỸ NĂNG [G]' : '🔒 CỔ VIỆN', btnX + btnSize / 2, btnY + btnSize + 16);
+    }
+
     this.ctx.restore();
   }
 
@@ -2168,19 +2467,26 @@ class Game {
     this.ctx.textAlign = 'center';
     this.ctx.shadowColor = '#d4af37';
     this.ctx.shadowBlur = 24;
-    this.ctx.fillText('LÊN CẤP! (LEVEL UP)', this.canvas.width / 2, 130);
+    this.ctx.fillText('LÊN CẤP! (LEVEL UP)', this.canvas.width / 2, 115);
     this.ctx.shadowBlur = 0;
 
-    this.ctx.fillStyle = '#e0e0e0';
-    this.ctx.font = '20px sans-serif';
-    this.ctx.fillText('Chọn 1 trong 3 nâng cấp bên dưới để cường hóa sức mạnh:', this.canvas.width / 2, 175);
+    this.ctx.fillStyle = this.isBanishModeActive ? '#f87171' : '#f8fafc';
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", "Segoe UI", Arial, sans-serif';
+    this.ctx.fillText(
+      this.isBanishModeActive
+        ? '⚠️ CHẾ ĐỘ LOẠI BỎ ĐANG BẬT: BẤM VÀO 1 THẺ ĐỂ LOẠI BỎ VĨNH VIỄN KHỎI TRẬN ĐẤU!'
+        : 'Chọn 1 trong 3 nâng cấp bên dưới để cường hóa sức mạnh:',
+      this.canvas.width / 2,
+      155
+    );
 
     this.choiceCardsRects = [];
-    const cardW = 440;
-    const cardH = 560;
-    const gap = 45;
+    const totalAvailableW = this.canvas.width - 120;
+    const cardW = Math.min(540, Math.floor((totalAvailableW - 60) / 3));
+    const cardH = 550;
+    const gap = 30;
     const startX = (this.canvas.width - (cardW * 3 + gap * 2)) / 2;
-    const cardY = 220;
+    const cardY = 185;
 
     for (let i = 0; i < this.currentChoices.length; i++) {
       const c = this.currentChoices[i];
@@ -2189,9 +2495,9 @@ class Game {
       this.choiceCardsRects.push({ x: cx, y: cardY, w: cardW, h: cardH });
 
       // Nền thẻ bài
-      this.ctx.fillStyle = 'rgba(20, 28, 44, 0.95)';
+      this.ctx.fillStyle = this.isBanishModeActive ? 'rgba(38, 18, 24, 0.96)' : 'rgba(20, 28, 44, 0.95)';
       this.ctx.fillRect(cx, cardY, cardW, cardH);
-      this.ctx.strokeStyle = '#d4af37';
+      this.ctx.strokeStyle = this.isBanishModeActive ? '#ef4444' : '#d4af37';
       this.ctx.lineWidth = 2.5;
       this.ctx.strokeRect(cx, cardY, cardW, cardH);
 
@@ -2202,7 +2508,7 @@ class Game {
 
       this.ctx.fillStyle = 'rgba(10, 15, 25, 0.9)';
       this.ctx.fillRect(iconX, iconY, iconSize, iconSize);
-      this.ctx.strokeStyle = '#ffd166';
+      this.ctx.strokeStyle = this.isBanishModeActive ? '#f87171' : '#ffd166';
       this.ctx.lineWidth = 2;
       this.ctx.strokeRect(iconX, iconY, iconSize, iconSize);
 
@@ -2214,22 +2520,22 @@ class Game {
       }
 
       // Tên nâng cấp
-      this.ctx.fillStyle = '#ffea79';
-      this.ctx.font = 'bold 24px "Segoe UI", sans-serif';
+      this.ctx.fillStyle = this.isBanishModeActive ? '#fca5a5' : '#ffea79';
+      this.ctx.font = 'bold 26px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
       this.ctx.fillText(c.name, cx + cardW / 2, cardY + 130);
 
       // Đường kẻ trang trí
-      this.ctx.strokeStyle = '#3a4d6b';
+      this.ctx.strokeStyle = this.isBanishModeActive ? '#7f1d1d' : '#3a4d6b';
       this.ctx.lineWidth = 1.5;
       this.ctx.beginPath();
       this.ctx.moveTo(cx + 35, cardY + 152);
       this.ctx.lineTo(cx + cardW - 35, cardY + 152);
       this.ctx.stroke();
 
-      // Mô tả chi tiết
-      this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.font = '18px "Segoe UI", sans-serif';
+      // Mô tả chi tiết (Trắng sáng, đậm nét, dễ đọc trên nền tối)
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'left';
 
       const words = c.desc.split(' ');
@@ -2240,30 +2546,70 @@ class Game {
         if (this.ctx.measureText(testLine).width > cardW - 70) {
           this.ctx.fillText(line, cx + 35, textY);
           line = w + ' ';
-          textY += 30;
+          textY += 32;
         } else {
           line = testLine;
         }
       }
       this.ctx.fillText(line, cx + 35, textY);
 
-      // Nút [LỰA CHỌN]
-      const selectBtnW = 260;
-      const selectBtnH = 54;
+      // Nút [LỰA CHỌN] hoặc [LOẠI BỎ]
+      const selectBtnW = Math.min(340, cardW - 60);
+      const selectBtnH = 56;
       const selectBtnX = cx + cardW / 2 - selectBtnW / 2;
-      const selectBtnY = cardY + cardH - 80;
+      const selectBtnY = cardY + cardH - 82;
 
-      this.ctx.fillStyle = '#2d6a4f';
+      this.ctx.fillStyle = this.isBanishModeActive ? '#7f1d1d' : '#2d6a4f';
       this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
-      this.ctx.strokeStyle = '#52b788';
+      this.ctx.strokeStyle = this.isBanishModeActive ? '#f87171' : '#52b788';
       this.ctx.lineWidth = 2;
       this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
 
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 20px sans-serif';
+      this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('LỰA CHỌN', cx + cardW / 2, selectBtnY + 35);
+      this.ctx.fillText(this.isBanishModeActive ? '🚫 LOẠI BỎ KHỎI TRẬN' : 'LỰA CHỌN', cx + cardW / 2, selectBtnY + 36);
     }
+
+    // --- CÁC NÚT ĐỔI LẠI (REROLL) VÀ LOẠI BỎ (BANISH) ---
+    const bottomBtnY = cardY + cardH + 24;
+    const btnW = Math.min(420, Math.floor((this.canvas.width - 160) / 2));
+    const btnH = 58;
+    const totalW = btnW * 2 + 30;
+    const rerollX = this.canvas.width / 2 - totalW / 2;
+    const banishX = rerollX + btnW + 30;
+
+    // Nút Reroll
+    this.rerollBtnRect = { x: rerollX, y: bottomBtnY, w: btnW, h: btnH };
+    const canReroll = (this.rerollCount || 0) > 0;
+    this.ctx.fillStyle = canReroll ? '#0369a1' : '#1e293b';
+    this.ctx.fillRect(rerollX, bottomBtnY, btnW, btnH);
+    this.ctx.strokeStyle = canReroll ? '#38bdf8' : '#475569';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(rerollX, bottomBtnY, btnW, btnH);
+    this.ctx.fillStyle = canReroll ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 21px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(`🎲 ĐỔI LẠI (${this.rerollCount || 0} LẦN)`, rerollX + btnW / 2, bottomBtnY + 36);
+
+    // Nút Banish
+    this.banishBtnRect = { x: banishX, y: bottomBtnY, w: btnW, h: btnH };
+    const canBanish = (this.banishCount || 0) > 0;
+    this.ctx.fillStyle = this.isBanishModeActive ? '#991b1b' : (canBanish ? '#831843' : '#1e293b');
+    this.ctx.fillRect(banishX, bottomBtnY, btnW, btnH);
+    this.ctx.strokeStyle = this.isBanishModeActive ? '#fca5a5' : (canBanish ? '#f43f5e' : '#475569');
+    this.ctx.lineWidth = this.isBanishModeActive ? 3 : 2;
+    this.ctx.strokeRect(banishX, bottomBtnY, btnW, btnH);
+    this.ctx.fillStyle = this.isBanishModeActive ? '#fef08a' : (canBanish ? '#ffffff' : '#64748b');
+    this.ctx.font = 'bold 21px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(
+      this.isBanishModeActive
+        ? `🚫 HỦY CHỌN LOẠI BỎ`
+        : `🚫 LOẠI BỎ (${this.banishCount || 0} LẦN)`,
+      banishX + btnW / 2,
+      bottomBtnY + 34
+    );
 
     this.ctx.restore();
   }
@@ -2292,16 +2638,20 @@ class Game {
 
     this.ctx.fillStyle = '#ffecb3';
     this.ctx.font = '22px sans-serif';
-    this.ctx.fillText('Bạn đã thu thập Lõi Tiến Hóa khi có 2 Vũ Khí Max Cấp 7!', this.canvas.width / 2, panelY + 135);
+    this.ctx.fillText('Bạn đã thu thập Lõi Tiến Hóa khi có 2 Vũ Khí Phụ Max Cấp 7!', this.canvas.width / 2, panelY + 135);
 
     this.ctx.fillStyle = '#ff88aa';
     this.ctx.font = 'bold 26px "Segoe UI", sans-serif';
-    this.ctx.fillText('⭐ HỢP NHẤT: BÃO KIẾM HUYỀN BƯỚM ⭐', this.canvas.width / 2, panelY + 205);
+    this.ctx.fillText('⭐ HỢP NHẤT: BÃO KIẾM HUYỀN BƯỚM ⭐', this.canvas.width / 2, panelY + 195);
+
+    this.ctx.fillStyle = '#38bdf8';
+    this.ctx.font = 'italic 16px sans-serif';
+    this.ctx.fillText('🛡️ Vũ khí chính độc nhất được bảo toàn vĩnh viễn (không bị tiêu hao).', this.canvas.width / 2, panelY + 230);
 
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = '20px sans-serif';
-    this.ctx.fillText('Tăng +120% Sát thương toàn bộ vũ khí, giảm -35% hồi chiêu,', this.canvas.width / 2, panelY + 255);
-    this.ctx.fillText('và phát nổ kiếm ánh sáng ma thuật liên tục quét sạch bản đồ!', this.canvas.width / 2, panelY + 290);
+    this.ctx.font = '19px sans-serif';
+    this.ctx.fillText('Tăng +120% Sát thương toàn bộ vũ khí, giảm -35% hồi chiêu,', this.canvas.width / 2, panelY + 268);
+    this.ctx.fillText('và phát nổ kiếm ánh sáng ma thuật liên tục quét sạch bản đồ!', this.canvas.width / 2, panelY + 298);
 
     const b = this.evolutionBtnRect;
     b.x = this.canvas.width / 2 - 180;
@@ -2817,52 +3167,54 @@ class Game {
     this.ctx.fill();
 
     // Nút Bật/Tắt Toàn Màn Hình ở góc trên phải
-    const fsBtnX = this.canvas.width - 250;
-    const fsBtnY = 30;
-    const fsBtnW = 210;
+    const fsBtnW = 220;
     const fsBtnH = 48;
+    const fsBtnX = this.canvas.width - fsBtnW - 35;
+    const fsBtnY = 30;
     this.ctx.fillStyle = 'rgba(25, 35, 55, 0.85)';
     this.ctx.fillRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
     this.ctx.strokeStyle = '#60a5fa';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(fsBtnX, fsBtnY, fsBtnW, fsBtnH);
     this.ctx.fillStyle = '#93c5fd';
-    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.font = 'bold 16px "Nunito", "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('⛶ Toàn Màn Hình (F)', fsBtnX + fsBtnW / 2, fsBtnY + 30);
     this.menuButtons.push({ x: fsBtnX, y: fsBtnY, w: fsBtnW, h: fsBtnH, id: 'toggle_fullscreen' });
 
-    // Tiêu đề Game hoành tráng
+    // Tiêu đề Game hoành tráng (Cỡ lớn, phông Nunito cao cấp)
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 72px "Segoe UI", serif';
+    this.ctx.font = 'bold 96px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
     this.ctx.shadowColor = '#d4af37';
-    this.ctx.shadowBlur = 30;
-    this.ctx.fillText('WITCH ESCAPE', this.canvas.width / 2, 230);
+    this.ctx.shadowBlur = 40;
+    this.ctx.fillText('WITCH ESCAPE', this.canvas.width / 2, 210);
 
     this.ctx.shadowBlur = 0;
     this.ctx.fillStyle = '#ff70a6';
-    this.ctx.font = 'italic 26px "Segoe UI", sans-serif';
-    this.ctx.fillText('— Chạy Thoát Khỏi Hòn Đảo Phù Thủy —', this.canvas.width / 2, 290);
+    this.ctx.font = 'bold 30px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('— Chạy Thoát Khỏi Hòn Đảo Phù Thủy —', this.canvas.width / 2, 272);
 
-    // Thống kê Vàng và Kỷ lục
-    const goldPanelX = this.canvas.width / 2 - 320;
-    const goldPanelY = 330;
-    this.ctx.fillStyle = 'rgba(20, 30, 48, 0.88)';
-    this.ctx.fillRect(goldPanelX, goldPanelY, 640, 65);
+    // Thống kê Vàng và Kỷ lục (Dãn rộng vừa vặn màn hình kéo ra)
+    const goldPanelW = Math.min(1050, Math.round(this.canvas.width * 0.52));
+    const goldPanelH = 72;
+    const goldPanelX = this.canvas.width / 2 - goldPanelW / 2;
+    const goldPanelY = 312;
+    this.ctx.fillStyle = 'rgba(20, 30, 48, 0.90)';
+    this.ctx.fillRect(goldPanelX, goldPanelY, goldPanelW, goldPanelH);
     this.ctx.strokeStyle = '#d4af37';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(goldPanelX, goldPanelY, 640, 65);
+    this.ctx.lineWidth = 2.5;
+    this.ctx.strokeRect(goldPanelX, goldPanelY, goldPanelW, goldPanelH);
 
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.font = 'bold 26px monospace';
+    this.ctx.font = 'bold 30px "Nunito", monospace';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(`🪙 Tiền Vàng: ${this.meta.gold}    |    🏆 Kỷ Lục: ${this.meta.highScore.toLocaleString()}`, this.canvas.width / 2, goldPanelY + 42);
+    this.ctx.fillText(`🪙 Tiền Vàng: ${this.meta.gold}    |    🏆 Kỷ Lục: ${this.meta.highScore.toLocaleString()}`, this.canvas.width / 2, goldPanelY + 46);
 
-    // Các Nút Menu Chính
+    // Các Nút Menu Chính (Dãn rộng thanh thoát, phông chữ lớn rõ nét)
     const savedInfo = this.getSavedGameInfo();
-    const btnW = 480;
-    const btnH = 54;
+    const btnW = Math.min(740, Math.round(this.canvas.width * 0.42));
+    const btnH = 62;
     const btnX = this.canvas.width / 2 - btnW / 2;
 
     const buttons = [];
@@ -2877,19 +3229,19 @@ class Game {
         color: '#1d4ed8',
         border: '#60a5fa'
       });
-      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 468, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 531, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 594, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 657, color: '#451a03', border: '#d4af37' });
-      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 720, color: '#334155', border: '#64748b' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 783, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI MỚI', y: 472, color: '#2d6a4f', border: '#52b788' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 539, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 606, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 673, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 740, color: '#334155', border: '#64748b' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 807, color: '#1e293b', border: '#475569' });
     } else {
       buttons.push({ id: 'start_game', label: '⚔️ BẮT ĐẦU CHƠI', y: 415, color: '#2d6a4f', border: '#52b788' });
-      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 479, color: '#581c87', border: '#c084fc' });
-      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 543, color: '#854d0e', border: '#eab308' });
-      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 607, color: '#451a03', border: '#d4af37' });
-      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 671, color: '#334155', border: '#64748b' });
-      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 735, color: '#1e293b', border: '#475569' });
+      buttons.push({ id: 'open_skill_tree', label: '✨ CÂY KỸ NĂNG & THÔNG THẠO', y: 482, color: '#581c87', border: '#c084fc' });
+      buttons.push({ id: 'open_shop', label: '🏪 NÂNG CẤP VĨNH VIỄN', y: 549, color: '#854d0e', border: '#eab308' });
+      buttons.push({ id: 'open_codex', label: '📖 THƯ VIỆN TÁC PHẨM', y: 616, color: '#451a03', border: '#d4af37' });
+      buttons.push({ id: 'open_settings', label: '⚙️ CÀI ĐẶT HỆ THỐNG', y: 683, color: '#334155', border: '#64748b' });
+      buttons.push({ id: 'how_to_play', label: '📜 HƯỚNG DẪN & ĐIỀU KHIỂN', y: 750, color: '#1e293b', border: '#475569' });
     }
 
     for (const b of buttons) {
@@ -2900,9 +3252,9 @@ class Game {
       this.ctx.strokeRect(btnX, b.y, btnW, btnH);
 
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 21px sans-serif';
+      this.ctx.font = 'bold 24px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(b.label, this.canvas.width / 2, b.y + 38);
+      this.ctx.fillText(b.label, this.canvas.width / 2, b.y + 40);
 
       this.menuButtons.push({ x: btnX, y: b.y, w: btnW, h: btnH, id: b.id });
     }
@@ -2919,27 +3271,31 @@ class Game {
     this.ctx.restore();
   }
 
-  // MÀN HÌNH CHỌN NHÂN VẬT
+  // MÀN HÌNH CHỌN NHÂN VẬT (1080p Full HD Responsive)
   renderCharSelect() {
     this.ctx.save();
+    this.menuButtons = [];
 
-    this.ctx.fillStyle = '#0a0d18';
+    this.ctx.fillStyle = '#080b12';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+    // Tiêu đề
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 44px "Segoe UI", serif';
+    this.ctx.font = 'bold 50px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('CHỌN ANH HÙNG XUẤT TRẬN', this.canvas.width / 2, 85);
+    this.ctx.fillText('CHỌN ANH HÙNG XUẤT TRẬN', this.canvas.width / 2, 75);
 
-    this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '16px sans-serif';
-    this.ctx.fillText('Mỗi nhân vật sở hữu thuộc tính và vũ khí khởi đầu độc nhất:', this.canvas.width / 2, 120);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('Mỗi nhân vật sở hữu thuộc tính khởi đầu, phong cách chiến đấu và cây kỹ năng thiên phú độc nhất:', this.canvas.width / 2, 115);
 
-    const cardW = 420;
-    const cardH = 580;
-    const gap = 45;
-    const startX = (this.canvas.width - (cardW * CONFIG.CHARACTERS.length + gap * (CONFIG.CHARACTERS.length - 1))) / 2;
-    const cardY = 200;
+    // Bố cục 3 thẻ nhân vật trải rộng toàn màn hình
+    const availableW = this.canvas.width - 120;
+    const gap = 36;
+    const cardW = Math.min(540, Math.floor((availableW - 2 * gap) / 3));
+    const cardH = 690;
+    const startX = Math.round((this.canvas.width - (cardW * CONFIG.CHARACTERS.length + gap * (CONFIG.CHARACTERS.length - 1))) / 2);
+    const cardY = 148;
 
     for (let i = 0; i < CONFIG.CHARACTERS.length; i++) {
       const char = CONFIG.CHARACTERS[i];
@@ -2947,45 +3303,40 @@ class Game {
       const isSelected = this.selectedChar.id === char.id;
 
       // Nền thẻ nhân vật
-      this.ctx.fillStyle = isSelected ? 'rgba(30, 41, 65, 0.95)' : 'rgba(15, 23, 42, 0.85)';
+      this.ctx.fillStyle = isSelected ? 'rgba(25, 38, 64, 0.96)' : 'rgba(15, 23, 42, 0.90)';
       this.ctx.fillRect(cx, cardY, cardW, cardH);
       this.ctx.strokeStyle = isSelected ? '#ffd166' : '#334155';
-      this.ctx.lineWidth = isSelected ? 3.5 : 1.5;
+      this.ctx.lineWidth = isSelected ? 3.5 : 1.8;
       this.ctx.strokeRect(cx, cardY, cardW, cardH);
 
-      // Tên nhân vật & danh hiệu
-      this.ctx.fillStyle = isSelected ? '#ffea79' : '#f8fafc';
-      this.ctx.font = 'bold 26px "Segoe UI", sans-serif';
+      // 1. Tên nhân vật & Danh hiệu (ĐẶT TRÊN CÙNG, HOÀN TOÀN KHÔNG BỊ NÚT NÀO ĐÈ LÊN)
+      this.ctx.fillStyle = isSelected ? '#ffd166' : '#f8fafc';
+      this.ctx.font = 'bold 28px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(char.name, cx + cardW / 2, cardY + 50);
+      this.ctx.fillText(char.name, cx + cardW / 2, cardY + 46);
 
       this.ctx.fillStyle = '#94a3b8';
-      this.ctx.font = 'italic 16px sans-serif';
-      this.ctx.fillText(char.title, cx + cardW / 2, cardY + 82);
+      this.ctx.font = 'italic 17px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText(char.title, cx + cardW / 2, cardY + 76);
 
-      // Nút mở nhanh Cây Kỹ Năng của nhân vật
-      const treeBtnW = 145;
-      const treeBtnH = 32;
-      const treeBtnX = cx + cardW - treeBtnW - 16;
-      const treeBtnY = cardY + 16;
-      this.ctx.fillStyle = '#3b0764';
-      this.ctx.fillRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
-      this.ctx.strokeStyle = '#c084fc';
-      this.ctx.lineWidth = 1.5;
-      this.ctx.strokeRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
-      this.ctx.fillStyle = '#f3e8ff';
-      this.ctx.font = 'bold 13px sans-serif';
-      this.ctx.textAlign = 'center';
-      this.ctx.fillText('🌲 Cây Kỹ Năng', treeBtnX + treeBtnW / 2, treeBtnY + 21);
-      this.menuButtons.push({ x: treeBtnX, y: treeBtnY, w: treeBtnW, h: treeBtnH, id: `open_char_skill_tree_${char.id}` });
+      // Đường kẻ ngăn cách mảnh tinh tế
+      this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.2)';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(cx + 35, cardY + 92);
+      this.ctx.lineTo(cx + cardW - 35, cardY + 92);
+      this.ctx.stroke();
 
-      // Khung vẽ ảnh nhân vật
-      const avatarBoxX = cx + cardW / 2 - 70;
-      const avatarBoxY = cardY + 105;
-      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-      this.ctx.fillRect(avatarBoxX, avatarBoxY, 140, 140);
-      this.ctx.strokeStyle = '#475569';
-      this.ctx.strokeRect(avatarBoxX, avatarBoxY, 140, 140);
+      // 2. KHU VỰC AVATAR LỚN (150x150) & NÚT CÂY KỸ NĂNG TÁCH BIỆT BÊN PHẢI
+      const avatarSize = 150;
+      const avatarX = cx + 45;
+      const avatarY = cardY + 105;
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      this.ctx.fillRect(avatarX, avatarY, avatarSize, avatarSize);
+      this.ctx.strokeStyle = isSelected ? '#ffd166' : '#475569';
+      this.ctx.lineWidth = isSelected ? 2 : 1.2;
+      this.ctx.strokeRect(avatarX, avatarY, avatarSize, avatarSize);
 
       const charImg = getIconImage(char.sprite);
       if (charImg && charImg.complete) {
@@ -2993,46 +3344,106 @@ class Game {
         if (char.spriteSheet) {
           const fw = Math.floor(charImg.naturalWidth / char.spriteSheet.cols);
           const fh = Math.floor(charImg.naturalHeight / char.spriteSheet.rows);
-          this.ctx.drawImage(charImg, 0, 0, fw, fh, avatarBoxX + 20, avatarBoxY + 20, 100, 100);
+          this.ctx.drawImage(charImg, 0, 0, fw, fh, avatarX + 15, avatarY + 15, 120, 120);
         } else {
           const natW = charImg.naturalWidth || 1;
           const natH = charImg.naturalHeight || 1;
-          const maxAvW = 120;
-          const maxAvH = 125;
+          const maxAvW = 130;
+          const maxAvH = 135;
           let drawW = maxAvW;
           let drawH = drawW * (natH / natW);
           if (drawH > maxAvH) {
             drawH = maxAvH;
             drawW = drawH * (natW / natH);
           }
-          const drawX = avatarBoxX + (140 - drawW) / 2;
-          const drawY = avatarBoxY + (140 - drawH) / 2;
+          const drawX = avatarX + (avatarSize - drawW) / 2;
+          const drawY = avatarY + (avatarSize - drawH) / 2;
           this.ctx.drawImage(charImg, drawX, drawY, drawW, drawH);
         }
       }
 
-      // Thông số thuộc tính
-      const statY = cardY + 285;
-      this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.font = '15px monospace';
-      this.ctx.textAlign = 'left';
-      this.ctx.fillText(`❤️ Máu tối đa: ${char.maxHealth}`, cx + 35, statY);
-      this.ctx.fillText(`👟 Tốc độ: ${char.baseSpeed}  |  🛡️ Giáp: ${char.baseArmor || 0}`, cx + 35, statY + 26);
-      this.ctx.fillText(`💥 Chí mạng: ${(char.critChance * 100).toFixed(0)}%  |  ⚡ Né: ${(char.dodgeRate * 100).toFixed(0)}%`, cx + 35, statY + 52);
+      // Nút mở nhanh Cây Kỹ Năng đặt bên cạnh Avatar to rõ, độc lập
+      const treeBtnW = 185;
+      const treeBtnH = 46;
+      const treeBtnX = cx + cardW - treeBtnW - 45;
+      const treeBtnY = avatarY + 38;
 
-      // Cấp Thông Thạo & Score của nhân vật
+      this.ctx.fillStyle = '#4c1d95';
+      this.ctx.fillRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
+      this.ctx.strokeStyle = '#c084fc';
+      this.ctx.lineWidth = 1.8;
+      this.ctx.strokeRect(treeBtnX, treeBtnY, treeBtnW, treeBtnH);
+
+      this.ctx.fillStyle = '#f3e8ff';
+      this.ctx.font = 'bold 16px "Nunito", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('🌲 CÂY KỸ NĂNG', treeBtnX + treeBtnW / 2, treeBtnY + 29);
+
+      this.ctx.fillStyle = '#c084fc';
+      this.ctx.font = 'bold 13px "Nunito", sans-serif';
+      this.ctx.fillText('Thiên phú nhánh', treeBtnX + treeBtnW / 2, treeBtnY + 64);
+
+      this.menuButtons.push({ x: treeBtnX, y: treeBtnY, w: treeBtnW, h: treeBtnH, id: `open_char_skill_tree_${char.id}` });
+
+      // 3. BẢNG CHỈ SỐ CƠ BẢN TO RÕ
+      const panelX = cx + 30;
+      const panelY = cardY + 276;
+      const panelW = cardW - 60;
+      const panelH = 90;
+
+      this.ctx.fillStyle = 'rgba(10, 15, 28, 0.75)';
+      this.ctx.fillRect(panelX, panelY, panelW, panelH);
+      this.ctx.strokeStyle = '#1e293b';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+      this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'left';
+
+      // Hàng 1
+      this.ctx.fillStyle = '#f43f5e';
+      this.ctx.fillText(`❤️ Máu: ${char.maxHealth}`, panelX + 20, panelY + 32);
+
+      this.ctx.fillStyle = '#38bdf8';
+      this.ctx.fillText(`👟 Tốc độ: ${char.baseSpeed}`, panelX + panelW / 2 + 10, panelY + 32);
+
+      // Hàng 2
+      this.ctx.fillStyle = '#fbbf24';
+      this.ctx.fillText(`💥 Crit: ${(char.critChance * 100).toFixed(0)}%`, panelX + 20, panelY + 68);
+
+      this.ctx.fillStyle = '#60a5fa';
+      this.ctx.fillText(`🛡️ Giáp: ${char.baseArmor || 0}  |  ⚡ Né: ${(char.dodgeRate * 100).toFixed(0)}%`, panelX + panelW / 2 + 10, panelY + 68);
+
+      // 4. CẤP THÔNG THẠO & ĐIỂM SCORE
+      const mPanelX = cx + 30;
+      const mPanelY = cardY + 380;
+      const mPanelW = cardW - 60;
+      const mPanelH = 46;
+
+      this.ctx.fillStyle = 'rgba(10, 15, 28, 0.85)';
+      this.ctx.fillRect(mPanelX, mPanelY, mPanelW, mPanelH);
+      this.ctx.strokeStyle = '#334155';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(mPanelX, mPanelY, mPanelW, mPanelH);
+
       const mastery = this.masterySystem.getCharData(char.id);
       this.ctx.fillStyle = '#fbbf24';
-      this.ctx.fillText(`⭐ Thông Thạo: Cấp ${mastery.level}/100`, cx + 35, statY + 80);
-      this.ctx.fillStyle = '#c084fc';
-      this.ctx.fillText(`🔮 Điểm Score: ${mastery.score.toLocaleString()}`, cx + 35, statY + 104);
+      this.ctx.font = 'bold 16px "Nunito", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(`⭐ Thông Thạo: Cấp ${mastery.level}/100`, mPanelX + 16, mPanelY + 29);
 
-      // Mô tả
-      this.ctx.fillStyle = '#94a3b8';
-      this.ctx.font = '14px sans-serif';
+      this.ctx.fillStyle = '#c084fc';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`🔮 Điểm Score: ${mastery.score.toLocaleString()}`, mPanelX + mPanelW - 16, mPanelY + 29);
+
+      // 5. MÔ TẢ ĐẶC TÍNH CHIẾN ĐẤU
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = 'bold 15px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'left';
+
       const words = char.desc.split(' ');
       let line = '';
-      let descY = statY + 132;
+      let descY = cardY + 452;
       for (const w of words) {
         const test = line + w + ' ';
         if (this.ctx.measureText(test).width > cardW - 70) {
@@ -3045,52 +3456,56 @@ class Game {
       }
       this.ctx.fillText(line, cx + 35, descY);
 
-      // Nút CHỌN
-      const selectBtnW = 220;
-      const selectBtnH = 48;
-      const selectBtnX = cx + cardW / 2 - selectBtnW / 2;
-      const selectBtnY = cardY + cardH - 65;
+      // 6. NÚT CHỌN ANH HÙNG TO BẢN (FULL THẺ)
+      const selectBtnW = cardW - 60;
+      const selectBtnH = 56;
+      const selectBtnX = cx + 30;
+      const selectBtnY = cardY + cardH - 80;
 
       this.ctx.fillStyle = isSelected ? '#d4af37' : '#1e293b';
       this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
       this.ctx.strokeStyle = isSelected ? '#fff0a6' : '#64748b';
-      this.ctx.lineWidth = 1.5;
+      this.ctx.lineWidth = 2;
       this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
 
       this.ctx.fillStyle = isSelected ? '#000000' : '#ffffff';
-      this.ctx.font = 'bold 17px sans-serif';
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN ANH HÙNG', cx + cardW / 2, selectBtnY + 30);
+      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN ANH HÙNG', selectBtnX + selectBtnW / 2, selectBtnY + 36);
 
       this.menuButtons.push({ x: cx, y: cardY, w: cardW, h: cardH, id: 'select_char_' + char.id, charData: char });
     }
 
-    // Nút Tiếp tục (Sang Chọn độ khó) và Nút Quay lại
-    const nextBtnW = 260;
-    const nextBtnH = 56;
-    const nextBtnX = this.canvas.width / 2 + 25;
-    const backBtnX = this.canvas.width / 2 - nextBtnW - 25;
-    const actionBtnY = this.canvas.height - 110;
+    // Nút Tiếp tục (Sang Chọn Chế Độ Chơi) và Nút Quay lại
+    const btnH = 58;
+    const btnY = this.canvas.height - 86;
 
     // Back
-    this.ctx.fillStyle = '#334155';
-    this.ctx.fillRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    const backBtnW = 280;
+    const backBtnX = this.canvas.width / 2 - 340;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(backBtnX, btnY, backBtnW, btnH);
     this.ctx.strokeStyle = '#64748b';
-    this.ctx.strokeRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(backBtnX, btnY, backBtnW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + nextBtnW / 2, actionBtnY + 30);
-    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_menu' });
+    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + backBtnW / 2, btnY + 36);
+    this.menuButtons.push({ x: backBtnX, y: btnY, w: backBtnW, h: btnH, id: 'back_to_menu' });
 
-    // Next (Sang Chọn Chế Độ Chơi)
+    // Next
+    const nextBtnW = 360;
+    const nextBtnX = this.canvas.width / 2 + 40;
     this.ctx.fillStyle = '#2d6a4f';
-    this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillRect(nextBtnX, btnY, nextBtnW, btnH);
     this.ctx.strokeStyle = '#52b788';
-    this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.lineWidth = 2.5;
+    this.ctx.strokeRect(nextBtnX, btnY, nextBtnW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText('TIẾP TỤC ➔', nextBtnX + nextBtnW / 2, actionBtnY + 30);
-    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_mode_select' });
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('TIẾP TỤC ➔', nextBtnX + nextBtnW / 2, btnY + 37);
+    this.menuButtons.push({ x: nextBtnX, y: btnY, w: nextBtnW, h: btnH, id: 'goto_mode_select' });
 
     this.ctx.restore();
   }
@@ -3100,133 +3515,235 @@ class Game {
   // =========================================================================
   renderModeSelect() {
     this.ctx.save();
+    this.menuButtons = [];
 
-    this.ctx.fillStyle = '#0a0d18';
+    this.ctx.fillStyle = '#080b12';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+    // Tiêu đề & Hướng dẫn
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 52px "Segoe UI", serif';
+    this.ctx.font = 'bold 50px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('CHỌN CHẾ ĐỘ THỬ THÁCH', this.canvas.width / 2, 95);
+    this.ctx.fillText('CHỌN CHẾ ĐỘ THỬ THÁCH', this.canvas.width / 2, 75);
 
-    this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '20px sans-serif';
-    this.ctx.fillText('Lựa chọn chiến dịch sinh tồn 20 phút hoặc thử thách vô tận không giới hạn thời gian:', this.canvas.width / 2, 145);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('Lựa chọn chiến dịch sinh tồn 20 phút cốt truyện hoặc thử thách sinh tồn vô tận không giới hạn thời gian:', this.canvas.width / 2, 115);
 
-    const cardW = 560;
-    const cardH = 540;
-    const gap = 60;
-    const startX = (this.canvas.width - (cardW * CONFIG.MODES.length + gap * (CONFIG.MODES.length - 1))) / 2;
-    const cardY = 210;
+    // Bố cục 2 thẻ chế độ trải rộng Full HD
+    const availableW = this.canvas.width - 160;
+    const gap = 50;
+    const cardW = Math.min(800, Math.floor((availableW - gap) / 2));
+    const cardH = 690;
+    const startX = Math.round((this.canvas.width - (cardW * 2 + gap)) / 2);
+    const cardY = 148;
 
     for (let i = 0; i < CONFIG.MODES.length; i++) {
       const mode = CONFIG.MODES[i];
       const cx = startX + i * (cardW + gap);
       const isSelected = this.selectedMode.id === mode.id;
+      const isNormal = mode.id === 'normal';
 
-      this.ctx.fillStyle = isSelected ? 'rgba(25, 35, 55, 0.96)' : 'rgba(15, 23, 42, 0.85)';
+      const themeColor = isNormal ? '#38bdf8' : '#f97316';
+      const badgeText = isNormal ? '🛡️ CHIẾN DỊCH CHUẨN' : '🔥 VÔ TẬN KHÔNG GIỚI HẠN';
+      const subTitle = isNormal
+        ? 'Chế độ kinh điển với lộ trình xuất hiện Boss và bão quái theo thời gian thực cố định'
+        : 'Thử thách sinh tồn khắc nghiệt cho cựu binh. Sức mạnh quái vật và Boss tăng tiến vô hạn';
+
+      // Nền thẻ chế độ
+      this.ctx.fillStyle = isSelected ? 'rgba(25, 38, 64, 0.96)' : 'rgba(15, 23, 42, 0.90)';
       this.ctx.fillRect(cx, cardY, cardW, cardH);
-      this.ctx.strokeStyle = isSelected ? mode.color : '#334155';
-      this.ctx.lineWidth = isSelected ? 3.5 : 1.5;
+      this.ctx.strokeStyle = isSelected ? themeColor : '#334155';
+      this.ctx.lineWidth = isSelected ? 3.5 : 1.8;
       this.ctx.strokeRect(cx, cardY, cardW, cardH);
 
-      // Icon & Tag
-      this.ctx.font = '54px sans-serif';
+      // Thanh viền sáng trang trí ở đỉnh thẻ
+      this.ctx.fillStyle = themeColor;
+      this.ctx.fillRect(cx, cardY, cardW, 4);
+
+      // 1. Huy hiệu chế độ
+      const badgeW = 280;
+      const badgeH = 34;
+      const badgeX = cx + cardW / 2 - badgeW / 2;
+      const badgeY = cardY + 22;
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      this.ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+      this.ctx.strokeStyle = themeColor;
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+
+      this.ctx.fillStyle = themeColor;
+      this.ctx.font = 'bold 15px "Nunito", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(mode.icon, cx + cardW / 2, cardY + 75);
+      this.ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + 22);
 
-      this.ctx.fillStyle = mode.color;
-      this.ctx.font = 'bold 16px monospace';
-      this.ctx.fillText(mode.tag, cx + cardW / 2, cardY + 115);
+      // 2. Tên chế độ lớn
+      this.ctx.fillStyle = themeColor;
+      this.ctx.font = 'bold 34px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(mode.name, cx + cardW / 2, cardY + 92);
 
-      // Tên Chế Độ
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 28px "Segoe UI", sans-serif';
-      this.ctx.fillText(mode.name, cx + cardW / 2, cardY + 160);
+      // 3. Mô tả ngắn
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '15px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText(subTitle, cx + cardW / 2, cardY + 125);
 
       // Đường kẻ phân cách
-      this.ctx.strokeStyle = '#334155';
+      this.ctx.strokeStyle = '#1e293b';
       this.ctx.lineWidth = 1;
       this.ctx.beginPath();
-      this.ctx.moveTo(cx + 40, cardY + 195);
-      this.ctx.lineTo(cx + cardW - 40, cardY + 195);
+      this.ctx.moveTo(cx + 36, cardY + 145);
+      this.ctx.lineTo(cx + cardW - 36, cardY + 145);
       this.ctx.stroke();
 
-      // Mô tả & Lộ trình
-      this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.font = '17px sans-serif';
-      this.ctx.textAlign = 'left';
+      // 4. Khối danh sách lộ trình / đặc tính
+      const boxX = cx + 32;
+      const boxY = cardY + 160;
+      const boxW = cardW - 64;
+      const boxH = 415;
 
-      if (mode.id === 'normal') {
-        let textY = cardY + 235;
-        this.ctx.fillText('⏳ Thời lượng trận đấu: 20 Phút', cx + 45, textY);
-        this.ctx.fillText('💀 Phút 02:30: Mini Boss đầu tiên xuất hiện (to x2.5)', cx + 45, textY + 36);
-        this.ctx.fillText('👹 Phút 10:00: Đại Ma Nữ Meruru (Phase 1 & 2)', cx + 45, textY + 72);
-        this.ctx.fillText('🔥 Phút 20:00: Chúa Tể Yuki (3 Phase, 7 Kỹ Năng)', cx + 45, textY + 108);
-        this.ctx.fillStyle = '#4ade80';
-        this.ctx.fillText('🏆 Tiêu diệt Yuki để CHIẾN THẮNG TRẬN ĐẤU!', cx + 45, textY + 155);
-      } else {
-        let textY = cardY + 235;
-        this.ctx.fillText('♾️ Thời lượng trận đấu: KHÔNG GIỚI HẠN', cx + 45, textY);
-        this.ctx.fillText('🔄 Lặp lại toàn bộ chu kỳ Boss lần 2 tới phút 40', cx + 45, textY + 36);
-        this.ctx.fillText('🌊 Sau phút 40: Biển quái dồn dập tràn ngập bản đồ', cx + 45, textY + 72);
-        this.ctx.fillText('🪙 Cày Tiền Vàng & Phá Kỷ Lục Điểm Số Tối Thượng', cx + 45, textY + 108);
-        this.ctx.fillStyle = '#f43f5e';
-        this.ctx.fillText('⚠️ Thử thách sinh tồn khắc nghiệt cho cựu binh!', cx + 45, textY + 155);
+      this.ctx.fillStyle = 'rgba(10, 15, 28, 0.82)';
+      this.ctx.fillRect(boxX, boxY, boxW, boxH);
+      this.ctx.strokeStyle = '#1e293b';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+      // Tiêu đề khối
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = 'bold 13px "Nunito", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(
+        isNormal ? 'LỘ TRÌNH VÀ CÁC CỘT MỐC QUAN TRỌNG:' : 'QUY TẮC VÀ ĐẶC ĐIỂM CHẾ ĐỘ VÔ TẬN:',
+        boxX + 20,
+        boxY + 28
+      );
+
+      // Các hàng thông số / sự kiện
+      const normalRows = [
+        { icon: '⏳', label: 'Thời Lượng Trận Đấu:', desc: 'Tối đa 20 Phút sinh tồn khốc liệt', tag: '20 PHÚT', tagColor: '#38bdf8' },
+        { icon: '💀', label: 'Phút 02:30:', desc: 'Mini Boss đầu tiên trỗi dậy (To x2.5, rơi Ngọc Hiếm)', tag: 'MINI BOSS', tagColor: '#fb923c' },
+        { icon: '👹', label: 'Phút 10:00:', desc: 'Đại Ma Nữ Meruru giáng thế (2 Giai đoạn biến hình cực mạnh)', tag: 'MERURU', tagColor: '#c084fc' },
+        { icon: '🔥', label: 'Phút 20:00:', desc: 'Chúa Tể Yuki xuất hiện (3 Giai đoạn, 7 Tuyệt kỹ hủy diệt)', tag: 'CHÚA TỂ YUKI', tagColor: '#f87171' },
+        { icon: '🏆', label: 'Mục Tiêu Tối Thượng:', desc: 'Hạ gục Chúa Tể Yuki để GIÀNH CHIẾN THẮNG VẺ VANG!', tag: 'CHIẾN THẮNG', tagColor: '#4ade80' }
+      ];
+
+      const endlessRows = [
+        { icon: '♾️', label: 'Thời Lượng Trận Đấu:', desc: 'KHÔNG GIỚI HẠN thời gian - Sinh tồn tới khi cạn kiệt HP', tag: 'VÔ TẬN', tagColor: '#f97316' },
+        { icon: '🔄', label: 'Tới Phút 40:00:', desc: 'Lặp lại toàn bộ chu kỳ Boss Meruru & Yuki đợt 2 với chỉ số x2', tag: 'CHU KỲ 2', tagColor: '#facc15' },
+        { icon: '🌊', label: 'Sau Phút 40:00:', desc: 'Biển quái dồn dập tràn ngập toàn bản đồ, mật độ cực hạn', tag: 'BIỂN QUÁI', tagColor: '#60a5fa' },
+        { icon: '🪙', label: 'Cơ Chế Cày Cuốc:', desc: 'Cày bội thu Tiền Vàng & Phá kỷ lục điểm số tối thượng', tag: 'FARM VÀNG', tagColor: '#fbbf24' },
+        { icon: '⚠️', label: 'Cảnh Báo Sinh Tử:', desc: 'Quái vật tăng tiến vô hạn - Thách thức cực đại cho cựu binh!', tag: 'TỬ THẦN', tagColor: '#fb7185' }
+      ];
+
+      const rows = isNormal ? normalRows : endlessRows;
+      const rowH = 64;
+      const rowGap = 10;
+      const rowStartY = boxY + 44;
+
+      for (let r = 0; r < rows.length; r++) {
+        const item = rows[r];
+        const ry = rowStartY + r * (rowH + rowGap);
+        const rx = boxX + 16;
+        const rw = boxW - 32;
+
+        // Nền dòng
+        this.ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+        this.ctx.fillRect(rx, ry, rw, rowH);
+        this.ctx.strokeStyle = isSelected ? 'rgba(51, 65, 85, 0.7)' : 'rgba(30, 41, 59, 0.6)';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(rx, ry, rw, rowH);
+
+        // Icon bên trái
+        this.ctx.font = '26px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(item.icon, rx + 30, ry + 42);
+
+        // Label & Desc
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.fillText(item.label, rx + 62, ry + 27);
+
+        this.ctx.fillStyle = r === 4 ? item.tagColor : '#cbd5e1';
+        this.ctx.font = (r === 4 ? 'bold ' : '') + '14px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.fillText(item.desc, rx + 62, ry + 50);
+
+        // Badge góc phải
+        const tagText = item.tag;
+        this.ctx.font = 'bold 12px "Nunito", sans-serif';
+        const tagW = Math.max(86, this.ctx.measureText(tagText).width + 18);
+        const tagH = 26;
+        const tagX = rx + rw - tagW - 14;
+        const tagY = ry + (rowH - tagH) / 2;
+
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        this.ctx.fillRect(tagX, tagY, tagW, tagH);
+        this.ctx.strokeStyle = item.tagColor;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(tagX, tagY, tagW, tagH);
+
+        this.ctx.fillStyle = item.tagColor;
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(tagText, tagX + tagW / 2, tagY + 17);
       }
 
-      // Nút Lựa Chọn
-      const selectBtnW = 280;
-      const selectBtnH = 54;
-      const selectBtnX = cx + cardW / 2 - selectBtnW / 2;
-      const selectBtnY = cardY + cardH - 80;
+      // 5. Nút Lựa Chọn Chế Độ
+      const selectBtnW = cardW - 64;
+      const selectBtnH = 58;
+      const selectBtnX = cx + 32;
+      const selectBtnY = cardY + cardH - 85;
 
-      this.ctx.fillStyle = isSelected ? mode.color : '#1e293b';
+      this.ctx.fillStyle = isSelected ? themeColor : '#1e293b';
       this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
-      this.ctx.strokeStyle = isSelected ? '#ffffff' : '#64748b';
-      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeStyle = isSelected ? '#ffffff' : '#475569';
+      this.ctx.lineWidth = isSelected ? 2 : 1;
       this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
 
       this.ctx.fillStyle = isSelected ? '#000000' : '#ffffff';
-      this.ctx.font = 'bold 18px sans-serif';
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN CHẾ ĐỘ NÀY', cx + cardW / 2, selectBtnY + 34);
+      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN CHẾ ĐỘ NÀY' : 'CHỌN CHẾ ĐỘ NÀY', cx + cardW / 2, selectBtnY + 36);
 
+      // Thẻ có thể click được
       this.menuButtons.push({ x: cx, y: cardY, w: cardW, h: cardH, id: 'select_mode_' + mode.id, modeData: mode });
     }
 
     // Nút Quay lại & Tiếp tục (Sang Chọn Thử Thách)
-    const nextBtnW = 260;
-    const nextBtnH = 56;
-    const nextBtnX = this.canvas.width / 2 + 25;
-    const backBtnX = this.canvas.width / 2 - nextBtnW - 25;
-    const actionBtnY = this.canvas.height - 110;
+    const backBtnW = 280;
+    const nextBtnW = 360;
+    const actionBtnH = 58;
+    const actionBtnY = this.canvas.height - 98;
+    const backBtnX = this.canvas.width / 2 - backBtnW - 20;
+    const nextBtnX = this.canvas.width / 2 + 20;
 
-    // Back
+    // Back Button
     this.ctx.fillStyle = '#334155';
-    this.ctx.fillRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.fillRect(backBtnX, actionBtnY, backBtnW, actionBtnH);
     this.ctx.strokeStyle = '#64748b';
-    this.ctx.strokeRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(backBtnX, actionBtnY, backBtnW, actionBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + nextBtnW / 2, actionBtnY + 34);
-    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_char_select' });
+    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + backBtnW / 2, actionBtnY + 36);
+    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: backBtnW, h: actionBtnH, id: 'back_to_char_select' });
 
-    // Next
-    this.ctx.fillStyle = '#2d6a4f';
-    this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
-    this.ctx.strokeStyle = '#52b788';
-    this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
+    // Next Button
+    this.ctx.fillStyle = '#16a34a';
+    this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, actionBtnH);
+    this.ctx.strokeStyle = '#4ade80';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, actionBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText('TIẾP TỤC (THỬ THÁCH) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 34);
-    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_challenge_select' });
+    this.ctx.fillText('TIẾP TỤC (THỬ THÁCH) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 36);
+    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: actionBtnH, id: 'goto_challenge_select' });
 
     this.ctx.restore();
   }
 
   // =========================================================================
-  // MÀN HÌNH TÙY CHỌN THỬ THÁCH (CHALLENGE MODIFIERS)
+  // MÀN HÌNH TÙY CHỌN THỬ THÁCH (1080p Full HD Responsive)
   // Bảng Checkbox tích chọn - Tăng Điểm & Vàng khi sống >= 2 phút
   // =========================================================================
   renderChallengeSelect() {
@@ -3236,13 +3753,13 @@ class Game {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 48px "Segoe UI", serif';
+    this.ctx.font = 'bold 52px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('THỬ THÁCH BỔ SUNG (TÙY CHỌN)', this.canvas.width / 2, 75);
+    this.ctx.fillText('THỬ THÁCH BỔ SUNG (TÙY CHỌN)', this.canvas.width / 2, 72);
 
-    this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '17px sans-serif';
-    this.ctx.fillText('Tích chọn các điều kiện khắc nghiệt để gia tăng độ khó và nhận thêm Điểm & Vàng thưởng:', this.canvas.width / 2, 115);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('Tích chọn các điều kiện khắc nghiệt để gia tăng độ khó và nhận thêm Điểm & Vàng thưởng:', this.canvas.width / 2, 112);
 
     // Tính tổng bonus hiện tại
     let totalScoreBonus = 0;
@@ -3258,10 +3775,10 @@ class Game {
     }
 
     // Thanh hiển thị tổng Bonus
-    const summaryBarW = 900;
-    const summaryBarH = 46;
+    const summaryBarW = Math.min(1150, Math.round(this.canvas.width * 0.55));
+    const summaryBarH = 52;
     const summaryX = this.canvas.width / 2 - summaryBarW / 2;
-    const summaryY = 135;
+    const summaryY = 132;
 
     this.ctx.fillStyle = 'rgba(25, 35, 55, 0.9)';
     this.ctx.fillRect(summaryX, summaryY, summaryBarW, summaryBarH);
@@ -3270,47 +3787,47 @@ class Game {
     this.ctx.strokeRect(summaryX, summaryY, summaryBarW, summaryBarH);
 
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.font = 'bold 18px monospace';
+    this.ctx.font = 'bold 21px "Nunito", monospace';
     this.ctx.textAlign = 'center';
     this.ctx.fillText(
       `ĐÃ CHỌN: ${checkedCount}/${CONFIG.CHALLENGES.length} Thử Thách    |    ⭐ Thưởng Điểm: +${Math.round(totalScoreBonus * 100)}%    |    🪙 Thưởng Vàng: +${Math.round(totalGoldBonus * 100)}%`,
       this.canvas.width / 2,
-      summaryY + 29
+      summaryY + 33
     );
 
     // Chú thích chống farm bẩn
     this.ctx.fillStyle = '#f87171';
-    this.ctx.font = 'italic 15px sans-serif';
-    this.ctx.fillText('⚠️ Điều kiện nhận thưởng: Bạn phải sống sót ít nhất 2 phút (120 giây) trong trận mới được kích hoạt bonus thử thách!', this.canvas.width / 2, summaryY + 68);
+    this.ctx.font = 'italic 16px "Nunito", sans-serif';
+    this.ctx.fillText('⚠️ Điều kiện nhận thưởng: Bạn phải sống sót ít nhất 2 phút (120 giây) trong trận mới được kích hoạt bonus thử thách!', this.canvas.width / 2, summaryY + 74);
 
-    // Danh sách 11 Thử thách chia thành 2 cột cân xứng
-    const colW = 680;
-    const itemH = 68;
-    const gapX = 40;
-    const gapY = 12;
-    const totalW = colW * 2 + gapX;
-    const leftX = (this.canvas.width - totalW) / 2;
-    const startY = 225;
+    // Danh sách 11 Thử thách chia thành 2 cột cân xứng lấp đầy màn hình
+    const availableW = this.canvas.width - 120;
+    const colW = Math.min(1050, Math.floor((availableW - 30) / 2));
+    const itemH = 88;
+    const gapY = 10;
+    const totalW = colW * 2 + 30;
+    const leftX = Math.round((this.canvas.width - totalW) / 2);
+    const startY = 224;
 
     for (let i = 0; i < CONFIG.CHALLENGES.length; i++) {
       const ch = CONFIG.CHALLENGES[i];
       const col = i % 2;
       const row = Math.floor(i / 2);
 
-      const ix = leftX + col * (colW + gapX);
+      const ix = leftX + col * (colW + 30);
       const iy = startY + row * (itemH + gapY);
       const isChecked = !!this.selectedChallenges[ch.id];
 
       // Nền ô thử thách
-      this.ctx.fillStyle = isChecked ? 'rgba(30, 41, 65, 0.95)' : 'rgba(15, 23, 42, 0.75)';
+      this.ctx.fillStyle = isChecked ? 'rgba(30, 41, 65, 0.95)' : 'rgba(15, 23, 42, 0.85)';
       this.ctx.fillRect(ix, iy, colW, itemH);
       this.ctx.strokeStyle = isChecked ? '#ffd166' : '#334155';
-      this.ctx.lineWidth = isChecked ? 2 : 1;
+      this.ctx.lineWidth = isChecked ? 2 : 1.2;
       this.ctx.strokeRect(ix, iy, colW, itemH);
 
       // Checkbox [✓] hoặc [ ]
-      const boxSize = 28;
-      const boxX = ix + 16;
+      const boxSize = 34;
+      const boxX = ix + 18;
       const boxY = iy + (itemH - boxSize) / 2;
 
       this.ctx.fillStyle = isChecked ? '#ffd700' : 'rgba(30, 40, 60, 0.9)';
@@ -3321,281 +3838,504 @@ class Game {
 
       if (isChecked) {
         this.ctx.fillStyle = '#000000';
-        this.ctx.font = 'bold 20px sans-serif';
+        this.ctx.font = 'bold 24px sans-serif';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText('✓', boxX + boxSize / 2, boxY + 22);
+        this.ctx.fillText('✓', boxX + boxSize / 2, boxY + 26);
       }
 
       // Tên Thử thách
-      this.ctx.fillStyle = isChecked ? '#ffea79' : '#f8fafc';
-      this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      this.ctx.fillStyle = isChecked ? '#ffea79' : '#ffffff';
+      this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(ch.name, boxX + boxSize + 14, iy + 27);
+      this.ctx.fillText(ch.name, boxX + boxSize + 16, iy + 34);
 
-      // Mô tả ngắn
-      this.ctx.fillStyle = '#94a3b8';
-      this.ctx.font = '14px sans-serif';
-      this.ctx.fillText(ch.desc, boxX + boxSize + 14, iy + 51);
+      // Mô tả ngắn (trắng sáng rõ nét)
+      this.ctx.fillStyle = '#e2e8f0';
+      this.ctx.font = 'bold 15px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText(ch.desc, boxX + boxSize + 16, iy + 64);
 
       // Bonus hiển thị bên phải
       this.ctx.fillStyle = '#4ade80';
-      this.ctx.font = 'bold 15px monospace';
+      this.ctx.font = 'bold 17px "Nunito", monospace';
       this.ctx.textAlign = 'right';
-      this.ctx.fillText(`+${Math.round(ch.scoreBonus * 100)}% Điểm | +${Math.round(ch.goldBonus * 100)}% Vàng`, ix + colW - 16, iy + 39);
+      this.ctx.fillText(`+${Math.round(ch.scoreBonus * 100)}% Điểm | +${Math.round(ch.goldBonus * 100)}% Vàng`, ix + colW - 20, iy + 49);
 
       this.menuButtons.push({ x: ix, y: iy, w: colW, h: itemH, id: 'toggle_challenge_' + ch.id });
     }
 
     // 2 Nút: Quay lại & Tiếp tục (Sang Chọn Độ Khó)
-    const nextBtnW = 280;
-    const nextBtnH = 56;
-    const nextBtnX = this.canvas.width / 2 + 25;
-    const backBtnX = this.canvas.width / 2 - nextBtnW - 25;
-    const actionBtnY = this.canvas.height - 95;
+    const nextBtnW = Math.min(320, Math.round(this.canvas.width * 0.22));
+    const nextBtnH = 58;
+    const nextBtnX = this.canvas.width / 2 + 20;
+    const backBtnX = this.canvas.width / 2 - nextBtnW - 20;
+    const actionBtnY = this.canvas.height - 86;
 
     // Back
     this.ctx.fillStyle = '#334155';
     this.ctx.fillRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
     this.ctx.strokeStyle = '#64748b';
+    this.ctx.lineWidth = 2;
     this.ctx.strokeRect(backBtnX, actionBtnY, nextBtnW, nextBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px sans-serif';
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY LẠI (CHẾ ĐỘ)', backBtnX + nextBtnW / 2, actionBtnY + 34);
+    this.ctx.fillText('⬅ QUAY LẠI (CHẾ ĐỘ)', backBtnX + nextBtnW / 2, actionBtnY + 38);
     this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'back_to_mode_select' });
 
     // Next
-    this.ctx.fillStyle = '#2d6a4f';
+    this.ctx.fillStyle = '#15803d';
     this.ctx.fillRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
-    this.ctx.strokeStyle = '#52b788';
+    this.ctx.strokeStyle = '#4ade80';
+    this.ctx.lineWidth = 2;
     this.ctx.strokeRect(nextBtnX, actionBtnY, nextBtnW, nextBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText('TIẾP TỤC (ĐỘ KHÓ) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 34);
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('TIẾP TỤC (ĐỘ KHÓ) ➔', nextBtnX + nextBtnW / 2, actionBtnY + 38);
     this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: nextBtnW, h: nextBtnH, id: 'goto_diff_select' });
 
     this.ctx.restore();
   }
 
-  // MÀN HÌNH CHỌN ĐỘ KHÓ (1080p Full HD)
+  // MÀN HÌNH CHỌN ĐỘ KHÓ (1080p Full HD Responsive)
   renderDiffSelect() {
     this.ctx.save();
+    this.menuButtons = [];
 
-    this.ctx.fillStyle = '#0a0d18';
+    this.ctx.fillStyle = '#080b12';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+    // Tiêu đề
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 56px "Segoe UI", serif';
+    this.ctx.font = 'bold 50px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('CHỌN CẤP ĐỘ THỬ THÁCH', this.canvas.width / 2, 100);
+    this.ctx.fillText('CHỌN CẤP ĐỘ THỬ THÁCH', this.canvas.width / 2, 75);
 
-    this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '20px sans-serif';
-    this.ctx.fillText('Độ khó càng cao, quái vật càng đông hung hãn nhưng phần thưởng vàng và điểm số càng lớn:', this.canvas.width / 2, 150);
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('Độ khó càng cao, quái vật càng đông và hung hãn nhưng phần thưởng Vàng & Điểm số bội thu!', this.canvas.width / 2, 115);
 
-    const cardW = 440;
-    const cardH = 560;
-    const gap = 45;
-    const startX = (this.canvas.width - (cardW * CONFIG.DIFFICULTIES.length + gap * (CONFIG.DIFFICULTIES.length - 1))) / 2;
-    const cardY = 220;
+    // Bố cục 3 thẻ độ khó trải rộng toàn màn hình
+    const availableW = this.canvas.width - 120;
+    const gap = 36;
+    const cardW = Math.min(540, Math.floor((availableW - 2 * gap) / 3));
+    const cardH = 690;
+    const startX = Math.round((this.canvas.width - (cardW * CONFIG.DIFFICULTIES.length + gap * (CONFIG.DIFFICULTIES.length - 1))) / 2);
+    const cardY = 148;
 
     for (let i = 0; i < CONFIG.DIFFICULTIES.length; i++) {
       const diff = CONFIG.DIFFICULTIES[i];
       const cx = startX + i * (cardW + gap);
       const isSelected = this.selectedDiff.id === diff.id;
 
-      this.ctx.fillStyle = isSelected ? 'rgba(30, 41, 65, 0.95)' : 'rgba(15, 23, 42, 0.85)';
+      // Theme màu sắc & Huy hiệu theo độ khó
+      let themeColor = diff.color;
+      let badgeText = '🌱 CƠ BẢN (KHỞI ĐẦU)';
+      let shortDesc = 'Dành cho người mới làm quen nhịp độ và tích lũy tiền vàng ban đầu.';
+      if (diff.id === 'nightmare') {
+        themeColor = '#f59e0b';
+        badgeText = '🔥 THỬ THÁCH CAO';
+        shortDesc = 'Quái đông hơn +62%, máu trâu hơn +40%. Đòi hỏi trang bị và di chuyển chuẩn xác.';
+      } else if (diff.id === 'hell') {
+        themeColor = '#ef4444';
+        badgeText = '☠️ CỰC KỲ KHỐC LIỆT';
+        shortDesc = 'Quái cực trâu x2 Máu, tốc độ nhanh khủng khiếp. Thách thức sinh tồn tột đỉnh!';
+      }
+
+      // Nền thẻ độ khó
+      this.ctx.fillStyle = isSelected ? 'rgba(25, 38, 64, 0.96)' : 'rgba(15, 23, 42, 0.90)';
       this.ctx.fillRect(cx, cardY, cardW, cardH);
-      this.ctx.strokeStyle = isSelected ? diff.color : '#334155';
-      this.ctx.lineWidth = isSelected ? 3.5 : 1.5;
+      this.ctx.strokeStyle = isSelected ? themeColor : '#334155';
+      this.ctx.lineWidth = isSelected ? 3.5 : 1.8;
       this.ctx.strokeRect(cx, cardY, cardW, cardH);
 
-      // Tên độ khó
-      this.ctx.fillStyle = diff.color;
-      this.ctx.font = 'bold 30px "Segoe UI", sans-serif';
+      // 1. Huy hiệu độ khó
+      const badgeW = 220;
+      const badgeH = 34;
+      const badgeX = cx + cardW / 2 - badgeW / 2;
+      const badgeY = cardY + 22;
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      this.ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+      this.ctx.strokeStyle = themeColor;
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+
+      this.ctx.fillStyle = themeColor;
+      this.ctx.font = 'bold 14px "Nunito", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(diff.name, cx + cardW / 2, cardY + 65);
+      this.ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + 22);
 
-      // Chi tiết thông số
-      const textX = cx + 45;
-      let lineY = cardY + 130;
-      this.ctx.fillStyle = '#e2e8f0';
-      this.ctx.font = '19px monospace';
+      // 2. Tên độ khó lớn
+      this.ctx.fillStyle = themeColor;
+      this.ctx.font = 'bold 34px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(diff.name, cx + cardW / 2, cardY + 92);
+
+      // 3. Khối thông số quái vật
+      const statBoxX = cx + 30;
+      const statBoxY = cardY + 120;
+      const statBoxW = cardW - 60;
+      const statBoxH = 135;
+
+      this.ctx.fillStyle = 'rgba(10, 15, 28, 0.8)';
+      this.ctx.fillRect(statBoxX, statBoxY, statBoxW, statBoxH);
+      this.ctx.strokeStyle = '#1e293b';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(statBoxX, statBoxY, statBoxW, statBoxH);
+
+      this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
+
+      // Máu quái
+      this.ctx.fillStyle = '#cbd5e1';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText(`Máu quái vật: x${diff.enemyHealthMult}`, textX, lineY);
-      this.ctx.fillText(`Tốc độ quái: x${diff.enemySpeedMult}`, textX, lineY + 38);
-      this.ctx.fillText(`Mật độ quái: x${diff.spawnRateMult}`, textX, lineY + 76);
+      this.ctx.fillText('🩸 Máu Quái Vật:', statBoxX + 20, statBoxY + 36);
+      this.ctx.fillStyle = isSelected ? '#ffffff' : '#f87171';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`x${diff.enemyHealthMult}`, statBoxX + statBoxW - 20, statBoxY + 36);
 
-      this.ctx.fillStyle = '#ffd700';
-      this.ctx.fillText(`⭐ Thưởng Điểm: x${diff.scoreMult}`, textX, lineY + 125);
-      this.ctx.fillText(`🪙 Thưởng Vàng: x${diff.goldMult}`, textX, lineY + 163);
+      // Tốc độ quái
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('⚡ Tốc Độ Quái:', statBoxX + 20, statBoxY + 76);
+      this.ctx.fillStyle = isSelected ? '#ffffff' : '#38bdf8';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`x${diff.enemySpeedMult}`, statBoxX + statBoxW - 20, statBoxY + 76);
 
-      // Mô tả tóm tắt
-      this.ctx.fillStyle = '#94a3b8';
-      this.ctx.font = '16px sans-serif';
-      this.ctx.fillText(diff.desc, textX, lineY + 215, cardW - 90);
+      // Mật độ quái
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('👥 Mật Độ Quái:', statBoxX + 20, statBoxY + 116);
+      this.ctx.fillStyle = isSelected ? '#ffffff' : '#fbbf24';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`x${diff.spawnRateMult}`, statBoxX + statBoxW - 20, statBoxY + 116);
 
-      // Nút Lựa chọn
-      const selectBtnW = 240;
-      const selectBtnH = 52;
-      const selectBtnX = cx + cardW / 2 - selectBtnW / 2;
+      // 4. Khối thưởng Vàng & Điểm nổi bật
+      const rBoxX = cx + 30;
+      const rBoxY = cardY + 272;
+      const rBoxW = cardW - 60;
+      const rBoxH = 100;
+
+      this.ctx.fillStyle = isSelected ? 'rgba(245, 158, 11, 0.15)' : 'rgba(10, 15, 28, 0.85)';
+      this.ctx.fillRect(rBoxX, rBoxY, rBoxW, rBoxH);
+      this.ctx.strokeStyle = isSelected ? '#ffd700' : 'rgba(255, 215, 0, 0.25)';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(rBoxX, rBoxY, rBoxW, rBoxH);
+
+      const scoreBonusPct = Math.round((diff.scoreMult - 1) * 100);
+      const goldBonusPct = Math.round((diff.goldMult - 1) * 100);
+
+      this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillStyle = '#ffd166';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('⭐ Thưởng Điểm Số:', rBoxX + 20, rBoxY + 38);
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(scoreBonusPct > 0 ? `+${scoreBonusPct}% (x${diff.scoreMult})` : `+0% (x1.0)`, rBoxX + rBoxW - 20, rBoxY + 38);
+
+      this.ctx.fillStyle = '#fde047';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('🪙 Thưởng Tiền Vàng:', rBoxX + 20, rBoxY + 76);
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(goldBonusPct > 0 ? `+${goldBonusPct}% (x${diff.goldMult})` : `+0% (x1.0)`, rBoxX + rBoxW - 20, rBoxY + 76);
+
+      // 5. Mô tả tóm tắt rõ nét
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = 'bold 15px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'left';
+
+      const descWords = (shortDesc || diff.desc).split(' ');
+      let dLine = '';
+      let dCurY = cardY + 400;
+      for (const w of descWords) {
+        const test = dLine + w + ' ';
+        if (this.ctx.measureText(test).width > cardW - 70) {
+          this.ctx.fillText(dLine, cx + 35, dCurY);
+          dLine = w + ' ';
+          dCurY += 24;
+        } else {
+          dLine = test;
+        }
+      }
+      this.ctx.fillText(dLine, cx + 35, dCurY);
+
+      // 6. Nút Lựa chọn to bản
+      const selectBtnW = cardW - 60;
+      const selectBtnH = 56;
+      const selectBtnX = cx + 30;
       const selectBtnY = cardY + cardH - 80;
 
-      this.ctx.fillStyle = isSelected ? diff.color : '#1e293b';
+      this.ctx.fillStyle = isSelected ? themeColor : '#1e293b';
       this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
       this.ctx.strokeStyle = isSelected ? '#ffffff' : '#64748b';
       this.ctx.lineWidth = 2;
       this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
 
       this.ctx.fillStyle = isSelected ? '#000000' : '#ffffff';
-      this.ctx.font = 'bold 18px sans-serif';
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN ĐỘ KHÓ', cx + cardW / 2, selectBtnY + 33);
+      this.ctx.fillText(isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN ĐỘ KHÓ', selectBtnX + selectBtnW / 2, selectBtnY + 36);
 
       this.menuButtons.push({ x: cx, y: cardY, w: cardW, h: cardH, id: 'select_diff_' + diff.id, diffData: diff });
     }
 
-    // Nút BẮT ĐẦU VÀO MÀN & Quay lại
-    const startBattleW = 320;
-    const startBattleH = 64;
-    const nextBtnX = this.canvas.width / 2 + 25;
-    const backBtnX = this.canvas.width / 2 - startBattleW - 25;
-    const actionBtnY = this.canvas.height - 130;
+    // Các Nút Điều Hướng Dưới Cùng (Quay Lại / Tiếp Tục Chọn Sách)
+    const btnH = 58;
+    const btnY = this.canvas.height - 86;
 
     // Back
-    this.ctx.fillStyle = '#334155';
-    this.ctx.fillRect(backBtnX, actionBtnY, startBattleW, startBattleH);
+    const backBtnW = 280;
+    const backBtnX = this.canvas.width / 2 - 350;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(backBtnX, btnY, backBtnW, btnH);
     this.ctx.strokeStyle = '#64748b';
     this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(backBtnX, actionBtnY, startBattleW, startBattleH);
+    this.ctx.strokeRect(backBtnX, btnY, backBtnW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 20px sans-serif';
+    this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + startBattleW / 2, actionBtnY + 39);
-    this.menuButtons.push({ x: backBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'back_to_challenge_select' });
+    this.ctx.fillText('⬅ QUAY LẠI', backBtnX + backBtnW / 2, btnY + 36);
+    this.menuButtons.push({ x: backBtnX, y: btnY, w: backBtnW, h: btnH, id: 'back_to_challenge_select' });
 
     // Chọn sách trước khi xuất trận
+    const nextBtnW = 380;
+    const nextBtnX = this.canvas.width / 2 + 30;
     this.ctx.fillStyle = '#b91c1c';
-    this.ctx.fillRect(nextBtnX, actionBtnY, startBattleW, startBattleH);
+    this.ctx.fillRect(nextBtnX, btnY, nextBtnW, btnH);
     this.ctx.strokeStyle = '#ef4444';
     this.ctx.lineWidth = 2.5;
-    this.ctx.strokeRect(nextBtnX, actionBtnY, startBattleW, startBattleH);
+    this.ctx.strokeRect(nextBtnX, btnY, nextBtnW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 20px sans-serif';
-    this.ctx.fillText('📖 CHỌN SÁCH KHỞI ĐẦU ➔', nextBtnX + startBattleW / 2, actionBtnY + 41);
-    this.menuButtons.push({ x: nextBtnX, y: actionBtnY, w: startBattleW, h: startBattleH, id: 'goto_book_select' });
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('📖 CHỌN SÁCH KHỞI ĐẦU ➔', nextBtnX + nextBtnW / 2, btnY + 37);
+    this.menuButtons.push({ x: nextBtnX, y: btnY, w: nextBtnW, h: btnH, id: 'goto_book_select' });
 
     this.ctx.restore();
   }
 
-  // MÀN HÌNH CỬA HÀNG NÂNG CẤP NGOÀI TRẬN BẰNG VÀNG (1080p Full HD)
+  // MÀN HÌNH CỬA HÀNG NÂNG CẤP NGOÀI TRẬN BẰNG VÀNG (1080p Full HD Responsive)
   renderShop() {
     this.ctx.save();
 
     this.ctx.fillStyle = '#0a0d18';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Tiêu đề & Vàng
+    // Tiêu đề
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 56px "Segoe UI", serif';
+    this.ctx.font = 'bold 50px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('CỔ VIỆN MA PHÁP (NÂNG CẤP VĨNH VIỄN)', this.canvas.width / 2, 85);
+    this.ctx.fillText('CỔ VIỆN MA PHÁP (NÂNG CẤP VĨNH VIỄN)', this.canvas.width / 2, 68);
 
+    const totalSpent = this.meta.getTotalSpent();
+    const availableWidth = this.canvas.width - 120;
+    const itemW = Math.min(1050, Math.floor((availableWidth - 30) / 2));
+    const totalCardsW = itemW * 2 + 30;
+    const col0X = Math.round((this.canvas.width - totalCardsW) / 2);
+    const col1X = col0X + itemW + 30;
+    const headerLeftX = col0X;
+    const headerRightX = col1X + itemW;
+
+    // Hiển thị số Tiền Vàng & Tổng đầu tư
+    this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.font = 'bold 26px monospace';
-    this.ctx.textAlign = 'right';
-    this.ctx.fillText(`🪙 Tiền Vàng Hiện Có: ${this.meta.gold.toLocaleString()} Vàng`, this.canvas.width / 2 + 60, 136);
+    this.ctx.font = 'bold 28px "Nunito", monospace';
+    this.ctx.fillText(`🪙 Tiền Vàng: ${this.meta.gold.toLocaleString()} Vàng`, headerLeftX, 122);
 
-    // Nút Nhận Vàng Test
-    const testGoldBtnW = 200;
-    const testGoldBtnH = 38;
-    const testGoldBtnX = this.canvas.width / 2 + 80;
-    const testGoldBtnY = 110;
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText(`(Đã đầu tư: ${totalSpent.toLocaleString()} Vàng vào các nâng cấp)`, headerLeftX + 380, 122);
+
+    // Nút Nhận Vàng Test bên phải ngoài cùng
+    const testGoldBtnW = 210;
+    const testGoldBtnH = 44;
+    const testGoldBtnX = headerRightX - testGoldBtnW;
+    const testGoldBtnY = 92;
     this.ctx.fillStyle = '#4c1d95';
     this.ctx.fillRect(testGoldBtnX, testGoldBtnY, testGoldBtnW, testGoldBtnH);
     this.ctx.strokeStyle = '#a855f7';
     this.ctx.lineWidth = 1.8;
     this.ctx.strokeRect(testGoldBtnX, testGoldBtnY, testGoldBtnW, testGoldBtnH);
     this.ctx.fillStyle = '#fde047';
-    this.ctx.font = 'bold 14px sans-serif';
+    this.ctx.font = 'bold 16px "Nunito", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('🎁 +1,000 VÀNG TEST', testGoldBtnX + testGoldBtnW / 2, testGoldBtnY + 24);
+    this.ctx.fillText('🎁 +1,000 VÀNG TEST', testGoldBtnX + testGoldBtnW / 2, testGoldBtnY + 28);
     this.menuButtons.push({ x: testGoldBtnX, y: testGoldBtnY, w: testGoldBtnW, h: testGoldBtnH, id: 'add_test_gold' });
 
-    // Danh sách 9 nâng cấp (Bố trí 2 cột đẹp mắt chuẩn Full HD 1080p)
-    const upgrades = Object.values(this.meta.upgrades);
-    const itemW = 840;
-    const itemH = 92;
-    const col0X = this.canvas.width / 2 - itemW - 20;
-    const col1X = this.canvas.width / 2 + 20;
-    const baseStartY = 170;
+    // Nút Tẩy Toàn Bộ & Hoàn Vàng 100%
+    const resetAllBtnW = 340;
+    const resetAllBtnH = 44;
+    const resetAllBtnX = testGoldBtnX - resetAllBtnW - 14;
+    const resetAllBtnY = 92;
+    const hasSpent = totalSpent > 0;
+    this.ctx.fillStyle = hasSpent ? '#831843' : '#1e293b';
+    this.ctx.fillRect(resetAllBtnX, resetAllBtnY, resetAllBtnW, resetAllBtnH);
+    this.ctx.strokeStyle = hasSpent ? '#f43f5e' : '#475569';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(resetAllBtnX, resetAllBtnY, resetAllBtnW, resetAllBtnH);
+    this.ctx.fillStyle = hasSpent ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 16px "Nunito", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(hasSpent ? `♻️ HOÀN VÀNG TẤT CẢ (+${totalSpent.toLocaleString()})` : '♻️ HOÀN VÀNG TẤT CẢ (0)', resetAllBtnX + resetAllBtnW / 2, resetAllBtnY + 28);
+    if (hasSpent) {
+      this.menuButtons.push({ x: resetAllBtnX, y: resetAllBtnY, w: resetAllBtnW, h: resetAllBtnH, id: 'reset_all_upgrades' });
+    }
 
-    for (let i = 0; i < upgrades.length; i++) {
-      const up = upgrades[i];
+    // --- CÁC TAB PHÂN LOẠI (CHỈ GIỮ 3 DANH MỤC: NỘI TẠI / CHỈ SỐ / THỬ THÁCH, MẶC ĐỊNH LÀ NỘI TẠI) ---
+    const activeFilter = (this.shopCategoryFilter === 'all' || !this.shopCategoryFilter) ? 'passive' : this.shopCategoryFilter;
+    const tabs = [
+      { id: 'passive', label: '🔮 NỘI TẠI & TÍNH NĂNG (6)' },
+      { id: 'stats', label: '⚔️ CHỈ SỐ CƠ BẢN (12)' },
+      { id: 'other', label: '☠️ THỬ THÁCH NGUYỀN RỦA (2)' }
+    ];
+    const tabW = Math.min(440, Math.floor((this.canvas.width - 160) / 3));
+    const tabH = 48;
+    const tabGap = 20;
+    const totalTabsW = tabs.length * tabW + (tabs.length - 1) * tabGap;
+    const tabStartX = this.canvas.width / 2 - totalTabsW / 2;
+    const tabY = 146;
+
+    for (let t = 0; t < tabs.length; t++) {
+      const tab = tabs[t];
+      const tx = tabStartX + t * (tabW + tabGap);
+      const isTabActive = (activeFilter === tab.id);
+
+      this.ctx.fillStyle = isTabActive ? 'rgba(30, 58, 138, 0.95)' : 'rgba(15, 23, 42, 0.85)';
+      this.ctx.fillRect(tx, tabY, tabW, tabH);
+      this.ctx.strokeStyle = isTabActive ? '#60a5fa' : '#334155';
+      this.ctx.lineWidth = isTabActive ? 2.5 : 1.5;
+      this.ctx.strokeRect(tx, tabY, tabW, tabH);
+
+      this.ctx.fillStyle = isTabActive ? '#ffd166' : '#94a3b8';
+      this.ctx.font = isTabActive ? 'bold 19px "Nunito", "Be Vietnam Pro", sans-serif' : 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(tab.label, tx + tabW / 2, tabY + 31);
+
+      this.menuButtons.push({ x: tx, y: tabY, w: tabW, h: tabH, id: 'shop_tab_' + tab.id });
+    }
+
+    // Lọc danh sách nâng cấp theo Tab
+    const allUpgrades = Object.values(this.meta.upgrades);
+    const filteredUpgrades = allUpgrades.filter(u => u.category === activeFilter);
+
+    // Bố trí 2 cột có tính cuộn màn hình (Scrollable)
+    const itemH = 100;
+    const itemGap = 12;
+    const baseStartY = 208;
+    const visibleTop = 195;
+    const visibleBottom = this.canvas.height - 86;
+    const viewHeight = visibleBottom - visibleTop;
+
+    const totalRows = Math.ceil(filteredUpgrades.length / 2);
+    const totalContentH = totalRows * (itemH + itemGap);
+    const maxScroll = Math.max(0, totalContentH - viewHeight + 30);
+    this.maxShopScrollY = maxScroll;
+    const scrollY = Math.min(this.shopScrollY || 0, maxScroll);
+
+    for (let i = 0; i < filteredUpgrades.length; i++) {
+      const up = filteredUpgrades[i];
       const isMax = up.level >= up.maxLevel;
       const cost = this.meta.getCost(up.id);
-      const canAfford = this.meta.gold >= cost && !isMax;
+      const canAfford = !isMax && (cost === 0 || this.meta.gold >= cost);
 
-      const col = i < 5 ? 0 : 1;
-      const row = i < 5 ? i : (i - 5);
+      const col = i % 2;
+      const row = Math.floor(i / 2);
       const itemX = col === 0 ? col0X : col1X;
-      const itemY = baseStartY + row * (itemH + 14);
+      const itemY = baseStartY + row * (itemH + itemGap) - scrollY;
 
-      this.ctx.fillStyle = 'rgba(20, 30, 48, 0.9)';
-      this.ctx.fillRect(itemX, itemY, itemW, itemH);
-      this.ctx.strokeStyle = '#3a4d6b';
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(itemX, itemY, itemW, itemH);
-
-      // Icon & Tên
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = '34px sans-serif';
-      this.ctx.textAlign = 'left';
-      this.ctx.fillText(up.icon, itemX + 18, itemY + 58);
-
-      this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
-      this.ctx.fillStyle = '#ffd166';
-      this.ctx.fillText(up.name, itemX + 75, itemY + 34);
-
-      // Mô tả & Cấp độ
-      this.ctx.font = '15px sans-serif';
-      this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.fillText(up.desc, itemX + 75, itemY + 65, itemW - 250);
-
-      // Vạch hiển thị cấp độ
-      const pipX = itemX + itemW - 240;
-      for (let p = 1; p <= up.maxLevel; p++) {
-        this.ctx.fillStyle = p <= up.level ? '#ffd700' : '#334155';
-        this.ctx.fillRect(pipX + p * 15, itemY + 36, 11, 20);
+      // Chỉ render và đăng ký tương tác nếu nằm trong vùng hiển thị
+      if (itemY + itemH < visibleTop || itemY > visibleBottom) {
+        continue;
       }
 
-      // Nút Mua Nâng Cấp
-      const buyBtnW = 135;
+      this.ctx.fillStyle = 'rgba(20, 30, 48, 0.94)';
+      this.ctx.fillRect(itemX, itemY, itemW, itemH);
+      this.ctx.strokeStyle = '#3a4d6b';
+      this.ctx.lineWidth = 1.8;
+      this.ctx.strokeRect(itemX, itemY, itemW, itemH);
+
+      // Icon nâng cấp
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = '36px sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(up.icon, itemX + 16, itemY + 60);
+
+      // Tên nâng cấp (Rõ nét, cỡ lớn, phông Nunito cao cấp)
+      this.ctx.font = 'bold 23px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillStyle = '#ffd166';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(up.name, itemX + 72, itemY + 36);
+
+      // Nút Mua Nâng Cấp [+]
+      const buyBtnW = 150;
       const buyBtnH = 48;
-      const buyBtnX = itemX + itemW - buyBtnW - 16;
+      const buyBtnX = itemX + itemW - buyBtnW - 14;
       const buyBtnY = itemY + (itemH - buyBtnH) / 2;
 
-      this.ctx.fillStyle = isMax ? '#334155' : (canAfford ? '#2d6a4f' : '#7f1d1d');
+      const isZeroCost = (cost === 0);
+      this.ctx.fillStyle = isMax ? '#334155' : (canAfford ? (isZeroCost ? '#15803d' : '#2d6a4f') : '#7f1d1d');
       this.ctx.fillRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH);
-      this.ctx.strokeStyle = isMax ? '#64748b' : (canAfford ? '#52b788' : '#ef4444');
+      this.ctx.strokeStyle = isMax ? '#64748b' : (canAfford ? (isZeroCost ? '#4ade80' : '#52b788') : '#ef4444');
       this.ctx.lineWidth = 1.5;
       this.ctx.strokeRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH);
 
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 17px sans-serif';
+      this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
       if (isMax) {
         this.ctx.fillText('ĐÃ MAX', buyBtnX + buyBtnW / 2, buyBtnY + 30);
+      } else if (isZeroCost) {
+        this.ctx.fillText('MIỄN PHÍ (0)', buyBtnX + buyBtnW / 2, buyBtnY + 30);
       } else {
         this.ctx.fillText(`🪙 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 30);
       }
       this.menuButtons.push({ x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH, id: 'buy_upgrade_' + up.id });
+
+      // Nút Hoàn Trả 1 Cấp [-]
+      const refBtnW = 48;
+      const refBtnH = 48;
+      const refBtnX = buyBtnX - refBtnW - 10;
+      const refBtnY = buyBtnY;
+      const canRefund = up.level > 0;
+
+      this.ctx.fillStyle = canRefund ? '#7f1d1d' : 'rgba(30, 41, 59, 0.4)';
+      this.ctx.fillRect(refBtnX, refBtnY, refBtnW, refBtnH);
+      this.ctx.strokeStyle = canRefund ? '#f87171' : '#334155';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(refBtnX, refBtnY, refBtnW, refBtnH);
+
+      this.ctx.fillStyle = canRefund ? '#fef08a' : '#475569';
+      this.ctx.font = 'bold 22px "Nunito", monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('[-]', refBtnX + refBtnW / 2, refBtnY + 32);
+
+      if (canRefund) {
+        this.menuButtons.push({
+          x: refBtnX,
+          y: refBtnY,
+          w: refBtnW,
+          h: refBtnH,
+          id: 'refund_upgrade_' + up.id
+        });
+      }
+
+      // Vạch hiển thị cấp độ (Pips)
+      const pipStartX = refBtnX - 16 - (up.maxLevel * 16);
+      for (let p = 1; p <= up.maxLevel; p++) {
+        this.ctx.fillStyle = p <= up.level ? '#ffd700' : '#334155';
+        this.ctx.fillRect(pipStartX + p * 16, itemY + 39, 11, 22);
+      }
+
+      // Mô tả & Cấp độ (Chữ trắng sáng đậm nét rõ ràng không bị mờ)
+      this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(up.desc, itemX + 72, itemY + 70, pipStartX - itemX - 82);
     }
 
-    // Nút Quay lại Menu Chính
-    const backBtnW = 320;
-    const backBtnH = 58;
+    // Nút Quay lại Menu Chính ở thanh dưới cùng
+    const backBtnW = Math.min(460, Math.round(this.canvas.width * 0.35));
+    const backBtnH = 56;
     const backBtnX = this.canvas.width / 2 - backBtnW / 2;
-    const backBtnY = this.canvas.height - 110;
+    const backBtnY = this.canvas.height - 74;
 
     this.ctx.fillStyle = '#1e293b';
     this.ctx.fillRect(backBtnX, backBtnY, backBtnW, backBtnH);
@@ -3603,7 +4343,7 @@ class Game {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(backBtnX, backBtnY, backBtnW, backBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 20px sans-serif';
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', backBtnX + backBtnW / 2, backBtnY + 36);
     this.menuButtons.push({ x: backBtnX, y: backBtnY, w: backBtnW, h: backBtnH, id: 'back_to_menu' });
@@ -3875,9 +4615,9 @@ class Game {
 
     // Nút 1: Tẩy Toàn Bộ Điểm Kỹ Năng (Hoàn Điểm Kỹ Năng)
     const hasAllocated = allocatedSkillPoints > 0;
-    const resetBtnW = 150;
+    const resetBtnW = 160;
     const resetBtnH = 42;
-    const resetBtnX = resetLvlBtnX - resetBtnW - 10;
+    const resetBtnX = resetLvlBtnX - resetBtnW - 12;
     const resetBtnY = bannerY + 36;
     this.ctx.fillStyle = hasAllocated ? '#831843' : '#1e293b';
     this.ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
@@ -3885,16 +4625,15 @@ class Game {
     this.ctx.lineWidth = hasAllocated ? 2 : 1;
     this.ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
     this.ctx.fillStyle = hasAllocated ? '#ffffff' : '#64748b';
-    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.font = 'bold 14px "Nunito", sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('🔄 TẨY KỸ NĂNG', resetBtnX + resetBtnW / 2, resetBtnY + 26);
     this.menuButtons.push({ x: resetBtnX, y: resetBtnY, w: resetBtnW, h: resetBtnH, id: 'reset_mastery_skills' });
-    this.ctx.fillText('♻️ TẨY CẤP & SCORE', resetLvlBtnX + resetLvlBtnW / 2, resetLvlBtnY + 27);
-    this.menuButtons.push({ x: resetLvlBtnX, y: resetLvlBtnY, w: resetLvlBtnW, h: resetLvlBtnH, id: 'reset_mastery_level' });
 
     // 4. Khu Vực Cây Kỹ Năng 3 Cột (Tấn Công - Sinh Tồn - Tiện Ích & Tinh Hoa)
-    const colW = 585;
-    const colGap = 32;
+    const availableW = this.canvas.width - 100;
+    const colGap = 24;
+    const colW = Math.floor((availableW - colGap * 2) / 3);
     const colStartY = 272;
     const colStartX = 50;
 
@@ -4740,127 +5479,240 @@ class Game {
 
     // Tiêu đề
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 46px "Segoe UI", serif';
+    this.ctx.font = 'bold 50px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('CHỌN TÁC PHẨM KHỞI ĐẦU', this.canvas.width / 2, 68);
 
     if (isNoBooksChallenge) {
       this.ctx.fillStyle = '#ef4444';
-      this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 19px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.fillText('🚫 THỬ THÁCH "CẤM DÙNG SÁCH" ĐANG ĐƯỢC BẬT - Bạn không thể mang theo hoặc nhặt sách trong trận đấu!', this.canvas.width / 2, 108);
     } else {
       this.ctx.fillStyle = '#cbd5e1';
-      this.ctx.font = '17px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
       const chosenCount = this.selectedStarterBookIds.length;
       this.ctx.fillText(
-        `Bạn có thể mang tối đa ${maxStarters} cuốn sách trước trận (${chosenCount}/${maxStarters} đã chọn):`,
+        `Bạn có thể mang tối đa ${maxStarters} cuốn sách trước trận (${chosenCount}/${maxStarters} đã chọn) — Cuộn chuột hoặc dùng phím mũi tên để xem:`,
         this.canvas.width / 2,
         108
       );
     }
 
-    // Grid 8 sách khởi đầu: 2 hàng 4 cột với THẺ SÁCH DỌC (PORTRAIT)
-    const cardBoxW = 390;
-    const cardBoxH = 370;
+    // Helper hàm vẽ chữ xuống dòng tự động (multi-line text wrap)
+    const drawWrappedText = (text, x, y, maxWidth, lineHeight) => {
+      const words = text.split(' ');
+      let line = '';
+      let curY = y;
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        const metrics = this.ctx.measureText(testLine);
+        if (metrics.width > maxWidth && n > 0) {
+          this.ctx.fillText(line.trim(), x, curY);
+          line = words[n] + ' ';
+          curY += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      this.ctx.fillText(line.trim(), x, curY);
+    };
+
+    // CAROUSEL BĂNG CHUYỀN NGANG: Phóng to thẻ sách & hiển thị lướt trái/phải mượt mà
+    const cardBoxW = 440;
+    const cardBoxH = 680;
     const gapX = 28;
-    const gapY = 16;
-    const totalGridW = 4 * cardBoxW + 3 * gapX;
-    const startX = (this.canvas.width - totalGridW) / 2;
-    const baseGridY = 145;
+    const cardY = 142;
+    const step = cardBoxW + gapX;
+    this.starterBookCardStep = step;
+
+    const totalContentW = STARTER_BOOK_IDS.length * step - gapX;
+    const carouselW = Math.min(this.canvas.width - 200, totalContentW);
+    const clipX = Math.round((this.canvas.width - carouselW) / 2);
+    const clipW = carouselW;
+    const maxScroll = Math.max(0, totalContentW - clipW);
+    this.starterBookMaxScrollX = maxScroll;
+
+    // Khởi tạo và làm mượt cuộn trang (Smooth Lerp Scroll)
+    if (this.starterBookTargetScrollX === undefined) this.starterBookTargetScrollX = 0;
+    if (this.starterBookScrollX === undefined) this.starterBookScrollX = 0;
+    this.starterBookTargetScrollX = Math.max(0, Math.min(maxScroll, this.starterBookTargetScrollX));
+    this.starterBookScrollX += (this.starterBookTargetScrollX - this.starterBookScrollX) * 0.25;
+    if (Math.abs(this.starterBookTargetScrollX - this.starterBookScrollX) < 0.5) {
+      this.starterBookScrollX = this.starterBookTargetScrollX;
+    }
+
+    // VÙNG CLIP CAROUSEL
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(clipX, cardY - 6, clipW, cardBoxH + 12);
+    this.ctx.clip();
 
     for (let i = 0; i < STARTER_BOOK_IDS.length; i++) {
       const bId = STARTER_BOOK_IDS[i];
       const def = BOOK_DEFINITIONS[bId];
-      const col = i % 4;
-      const row = Math.floor(i / 4);
+      const bx = clipX + i * step - this.starterBookScrollX;
 
-      const bx = startX + col * (cardBoxW + gapX);
-      const by = baseGridY + row * (cardBoxH + gapY);
+      // Bỏ qua nếu card nằm hoàn toàn ngoài màn hình hiển thị
+      if (bx + cardBoxW < clipX - 50 || bx > clipX + clipW + 50) continue;
+
       const isSelected = !isNoBooksChallenge && this.selectedStarterBookIds.includes(bId);
 
-      this.ctx.fillStyle = isSelected ? 'rgba(35, 45, 65, 0.96)' : (isNoBooksChallenge ? 'rgba(12, 14, 20, 0.6)' : 'rgba(16, 22, 34, 0.9)');
-      this.ctx.fillRect(bx, by, cardBoxW, cardBoxH);
-      this.ctx.strokeStyle = isSelected ? '#ffd700' : (isNoBooksChallenge ? '#1e293b' : '#334155');
-      this.ctx.lineWidth = isSelected ? 3 : 1.5;
-      this.ctx.strokeRect(bx, by, cardBoxW, cardBoxH);
+      // Thẻ nền
+      this.ctx.fillStyle = isSelected ? 'rgba(30, 45, 68, 0.96)' : (isNoBooksChallenge ? 'rgba(12, 14, 20, 0.65)' : 'rgba(15, 23, 42, 0.92)');
+      this.ctx.fillRect(bx, cardY, cardBoxW, cardBoxH);
+      this.ctx.strokeStyle = isSelected ? '#38bdf8' : (isNoBooksChallenge ? '#1e293b' : '#334155');
+      this.ctx.lineWidth = isSelected ? 3.5 : 1.8;
+      this.ctx.strokeRect(bx, cardY, cardBoxW, cardBoxH);
 
-      // Thẻ sách dọc Canvas tỷ lệ 1 : 1.4 chuẩn bìa sách thật ngoài đời
-      const cardW = 144;
-      const cardH = 202;
-      const cardX = bx + (cardBoxW - cardW) / 2;
-      const cardY = by + 14;
+      // Nhãn Đang Chọn góc trên
+      if (isSelected) {
+        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+        this.ctx.fillRect(bx, cardY, cardBoxW, 46);
+        this.ctx.fillStyle = '#38bdf8';
+        this.ctx.font = 'bold 15px "Nunito", sans-serif';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText('✓ ĐANG CHỌN', bx + cardBoxW - 18, cardY + 30);
+      }
+
+      // Thẻ bìa sách lớn tỷ lệ 1 : 1.4 (210 x 294px)
+      const coverW = 210;
+      const coverH = 294;
+      const coverX = bx + (cardBoxW - coverW) / 2;
+      const coverY = cardY + 28;
 
       this.ctx.save();
       if (isNoBooksChallenge) this.ctx.globalAlpha = 0.45;
-      this.bookSystem.renderBookCard(this.ctx, bId, cardX, cardY, cardW, cardH, isSelected);
+      this.bookSystem.renderBookCard(this.ctx, bId, coverX, coverY, coverW, coverH, isSelected);
       this.ctx.restore();
 
-      // Tác giả & buffs
-      this.ctx.fillStyle = isNoBooksChallenge ? '#64748b' : '#ffffff';
-      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      // Tên tác giả (Không có icon ✍️, không có chữ cổ viện)
+      this.ctx.fillStyle = isNoBooksChallenge ? '#64748b' : '#ffd166';
+      this.ctx.font = 'bold 24px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(`✍️ ${def ? def.author : ''}`, bx + cardBoxW / 2, by + 236);
+      this.ctx.fillText(def ? def.author : '', bx + cardBoxW / 2, cardY + 368);
 
+      // Thuộc tính & Buff hiệu ứng (cỡ chữ 17px, tự động xuống dòng rõ nét)
       this.ctx.fillStyle = isNoBooksChallenge ? '#475569' : '#fde047';
-      this.ctx.font = '13px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
       const buffText = def ? (def.desc || def.buffDesc || '') : '';
-      this.ctx.fillText(buffText, bx + cardBoxW / 2, by + 260, cardBoxW - 24);
+      drawWrappedText(buffText, bx + cardBoxW / 2, cardY + 412, cardBoxW - 44, 25);
 
-      // Điều kiện tiến hóa bí ẩn
-      this.ctx.fillStyle = isNoBooksChallenge ? '#334155' : '#94a3b8';
-      this.ctx.font = 'italic 12px "Segoe UI", sans-serif';
-      this.ctx.fillText('🔒 Tiến Cấp: ??? (Điều kiện bí ẩn)', bx + cardBoxW / 2, by + 285);
+      // Điều kiện tiến cấp bí ẩn
+      this.ctx.fillStyle = isNoBooksChallenge ? '#334155' : '#38bdf8';
+      this.ctx.font = 'italic 15px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText('🔒 Tiến Cấp: ??? (Điều kiện bí ẩn)', bx + cardBoxW / 2, cardY + 520);
 
-      // Nút Lựa Chọn
-      const selectBtnW = 200;
-      const selectBtnH = 40;
+      // Nút Lựa Chọn cỡ lớn (340 x 56px)
+      const selectBtnW = 340;
+      const selectBtnH = 56;
       const selectBtnX = bx + (cardBoxW - selectBtnW) / 2;
-      const selectBtnY = by + 312;
+      const selectBtnY = cardY + cardBoxH - 82;
 
       this.ctx.fillStyle = isNoBooksChallenge ? '#1e293b' : (isSelected ? '#15803d' : '#1e293b');
       this.ctx.fillRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
       this.ctx.strokeStyle = isNoBooksChallenge ? '#334155' : (isSelected ? '#4ade80' : '#475569');
-      this.ctx.lineWidth = 1.8;
+      this.ctx.lineWidth = 2;
       this.ctx.strokeRect(selectBtnX, selectBtnY, selectBtnW, selectBtnH);
 
       this.ctx.fillStyle = isNoBooksChallenge ? '#64748b' : (isSelected ? '#ffffff' : '#cbd5e1');
-      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
-      this.ctx.fillText(isNoBooksChallenge ? '🚫 CẤM DÙNG' : (isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN SÁCH'), selectBtnX + selectBtnW / 2, selectBtnY + 25);
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText(isNoBooksChallenge ? '🚫 CẤM DÙNG' : (isSelected ? '✓ ĐÃ CHỌN' : 'CHỌN SÁCH'), selectBtnX + selectBtnW / 2, selectBtnY + 36);
 
-      if (!isNoBooksChallenge) {
-        this.menuButtons.push({ x: bx, y: by, w: cardBoxW, h: cardBoxH, id: 'toggle_starter_book_' + bId });
+      // Chỉ bắt click nếu card nằm trong vùng nhìn thấy của Carousel
+      if (!isNoBooksChallenge && (bx + cardBoxW >= clipX && bx <= clipX + clipW)) {
+        this.menuButtons.push({ x: bx, y: cardY, w: cardBoxW, h: cardBoxH, id: 'toggle_starter_book_' + bId });
       }
     }
 
-    // Các Nút Hành Động Ở Dưới Cùng (Quay Lại / Vào Trận)
-    const btnH = 56;
-    const btnY = this.canvas.height - 95;
+    this.ctx.restore(); // Kết thúc Clip Carousel
 
-    // Nút Quay Lại
-    const backW = 260;
-    const backX = this.canvas.width / 2 - 320;
-    this.ctx.fillStyle = '#334155';
+    // CÁC NÚT ĐIỀU HƯỚNG MŨI TÊN (◀ và ▶)
+    const arrowSize = 64;
+    const arrowY = cardY + (cardBoxH - arrowSize) / 2;
+
+    // Mũi tên Trái [◀]
+    const leftX = Math.max(16, clipX - arrowSize - 20);
+    const canScrollLeft = this.starterBookScrollX > 5;
+    this.ctx.fillStyle = canScrollLeft ? 'rgba(30, 41, 59, 0.95)' : 'rgba(15, 23, 42, 0.5)';
+    this.ctx.fillRect(leftX, arrowY, arrowSize, arrowSize);
+    this.ctx.strokeStyle = canScrollLeft ? '#60a5fa' : '#334155';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(leftX, arrowY, arrowSize, arrowSize);
+    this.ctx.fillStyle = canScrollLeft ? '#ffffff' : '#475569';
+    this.ctx.font = 'bold 30px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('◀', leftX + arrowSize / 2, arrowY + 44);
+    if (canScrollLeft) {
+      this.menuButtons.push({ x: leftX, y: arrowY, w: arrowSize, h: arrowSize, id: 'prev_starter_book' });
+    }
+
+    // Mũi tên Phải [▶]
+    const rightX = Math.min(this.canvas.width - arrowSize - 16, clipX + clipW + 20);
+    const canScrollRight = this.starterBookScrollX < maxScroll - 5;
+    this.ctx.fillStyle = canScrollRight ? 'rgba(30, 41, 59, 0.95)' : 'rgba(15, 23, 42, 0.5)';
+    this.ctx.fillRect(rightX, arrowY, arrowSize, arrowSize);
+    this.ctx.strokeStyle = canScrollRight ? '#60a5fa' : '#334155';
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeRect(rightX, arrowY, arrowSize, arrowSize);
+    this.ctx.fillStyle = canScrollRight ? '#ffffff' : '#475569';
+    this.ctx.font = 'bold 30px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('▶', rightX + arrowSize / 2, arrowY + 44);
+    if (canScrollRight) {
+      this.menuButtons.push({ x: rightX, y: arrowY, w: arrowSize, h: arrowSize, id: 'next_starter_book' });
+    }
+
+    // CHẤM BI CHỈ BÁO CUỘN (Scroll Indicator Dots)
+    const dotY = cardY + cardBoxH + 20;
+    const dotCount = STARTER_BOOK_IDS.length;
+    const dotGap = 22;
+    const dotsTotalW = (dotCount - 1) * dotGap;
+    const dotStartX = this.canvas.width / 2 - dotsTotalW / 2;
+    const activeDotIndex = Math.min(dotCount - 1, Math.max(0, Math.round(this.starterBookScrollX / step)));
+
+    for (let d = 0; d < dotCount; d++) {
+      const dx = dotStartX + d * dotGap;
+      const isDotActive = (d === activeDotIndex);
+      this.ctx.beginPath();
+      this.ctx.arc(dx, dotY, isDotActive ? 7 : 4, 0, Math.PI * 2);
+      this.ctx.fillStyle = isDotActive ? '#38bdf8' : '#475569';
+      this.ctx.fill();
+      if (isDotActive) {
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.stroke();
+      }
+    }
+
+    // CÁC NÚT HÀNH ĐỘNG DƯỚI CÙNG (Quay Lại / Vào Trận)
+    const btnH = 58;
+    const btnY = Math.max(dotY + 28, this.canvas.height - 86);
+
+    // Nút Quay Lại (280 x 58px)
+    const backW = 280;
+    const backX = this.canvas.width / 2 - 340;
+    this.ctx.fillStyle = '#1e293b';
     this.ctx.fillRect(backX, btnY, backW, btnH);
     this.ctx.strokeStyle = '#64748b';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(backX, btnY, backW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 19px "Segoe UI", sans-serif';
+    this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY LẠI', backX + backW / 2, btnY + 35);
+    this.ctx.fillText('⬅ QUAY LẠI', backX + backW / 2, btnY + 36);
     this.menuButtons.push({ x: backX, y: btnY, w: backW, h: btnH, id: 'back_to_diff_select' });
 
-    // Nút Vào Trận
-    const startW = 340;
-    const startXBtn = this.canvas.width / 2 + 20;
+    // Nút Vào Trận (360 x 58px)
+    const startW = 360;
+    const startXBtn = this.canvas.width / 2 + 40;
     this.ctx.fillStyle = '#b91c1c';
     this.ctx.fillRect(startXBtn, btnY, startW, btnH);
     this.ctx.strokeStyle = '#ef4444';
     this.ctx.lineWidth = 2.5;
     this.ctx.strokeRect(startXBtn, btnY, startW, btnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 21px "Segoe UI", sans-serif';
-    this.ctx.fillText('🔥 VÀO TRẬN ĐẤU 🔥', startXBtn + startW / 2, btnY + 36);
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('🔥 VÀO TRẬN ĐẤU 🔥', startXBtn + startW / 2, btnY + 37);
     this.menuButtons.push({ x: startXBtn, y: btnY, w: startW, h: btnH, id: 'start_battle_from_books' });
 
     this.ctx.restore();
@@ -4873,7 +5725,7 @@ class Game {
     this.ctx.save();
     this.menuButtons = [];
 
-    // Nền thư viện cổ điển hoàng gia
+    // Nền tối huyền bí thư viện cổ điển
     this.ctx.fillStyle = '#06080e';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -4882,13 +5734,13 @@ class Game {
 
     // Tiêu đề
     this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 44px "Segoe UI", serif';
+    this.ctx.font = 'bold 48px "Nunito", "Be Vietnam Pro", serif';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('📖 THƯ VIỆN TÁC PHẨM', this.canvas.width / 2, 68);
 
     this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.font = '16px "Segoe UI", sans-serif';
-    this.ctx.fillText(`Tổng hợp 35 Tác Phẩm. Đã khám phá: ${unlockedCount}/35 Sách`, this.canvas.width / 2, 102);
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText(`Tổng hợp 35 Tác Phẩm Kinh Điển. Đã khám phá: ${unlockedCount}/35 Sách`, this.canvas.width / 2, 102);
 
     // Các Tab Lọc Thư Viện: Tất Cả (35) | Khởi Đầu (8) | Tiến Hóa (15) | Hợp Thể Ẩn (12)
     const tabs = [
@@ -4898,12 +5750,12 @@ class Game {
       { id: 'fusion', label: 'HỢP THỂ ẨN (12)' }
     ];
 
-    const tabW = 200;
-    const tabH = 40;
+    const tabW = 230;
+    const tabH = 44;
     const tabGap = 16;
     const totalTabW = tabs.length * tabW + (tabs.length - 1) * tabGap;
     const tabStartX = this.canvas.width / 2 - totalTabW / 2;
-    const tabY = 130;
+    const tabY = 126;
 
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
@@ -4913,13 +5765,13 @@ class Game {
       this.ctx.fillStyle = isAct ? '#854d0e' : '#1e293b';
       this.ctx.fillRect(tx, tabY, tabW, tabH);
       this.ctx.strokeStyle = isAct ? '#ffd700' : '#475569';
-      this.ctx.lineWidth = isAct ? 2 : 1;
+      this.ctx.lineWidth = isAct ? 2.5 : 1.2;
       this.ctx.strokeRect(tx, tabY, tabW, tabH);
 
       this.ctx.fillStyle = isAct ? '#fef08a' : '#cbd5e1';
-      this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(tab.label, tx + tabW / 2, tabY + 25);
+      this.ctx.fillText(tab.label, tx + tabW / 2, tabY + 28);
 
       this.menuButtons.push({ x: tx, y: tabY, w: tabW, h: tabH, id: 'filter_codex_' + tab.id });
     }
@@ -4934,23 +5786,31 @@ class Game {
       displayIds = allBookIds.filter(id => BOOK_DEFINITIONS[id].fusionIngredients || id === 'camus' || id === 'adam_smith' || id === 'sartre');
     }
 
-    // Vùng cuộn sách (Grid 4 cột)
-    const clipX = 60;
-    const clipY = 190;
-    const clipW = this.canvas.width - 120;
-    const clipH = 715;
+    // VÙNG TRƯNG BÀY BĂNG CHUYỀN LƯỚI NGANG TRÊN DƯỚI (GALLERY 6 CỘT)
+    const clipX = 70;
+    const clipY = 188;
+    const clipW = this.canvas.width - 140;
+    const clipH = this.canvas.height - 300;
+
+    const cols = 6;
+    const gapX = 24;
+    const gapY = 24;
+    const cardW = Math.floor((clipW - (cols - 1) * gapX) / cols);
+    const coverW = 168;
+    const coverH = 235; // Tỉ lệ 1 : 1.4 chuẩn bìa sách
+    const cardH = coverH + 52;
+    const startX = clipX;
+
+    const totalRows = Math.ceil(displayIds.length / cols);
+    const totalContentH = totalRows * (cardH + gapY) + 20;
+    const maxScroll = Math.max(0, totalContentH - clipH);
+    this.codexMaxScrollY = maxScroll;
+    this.codexScrollY = Math.max(0, Math.min(maxScroll, this.codexScrollY || 0));
 
     this.ctx.save();
     this.ctx.beginPath();
     this.ctx.rect(clipX, clipY, clipW, clipH);
     this.ctx.clip();
-
-    const cardW = 410;
-    const cardH = 220;
-    const gapX = 20;
-    const gapY = 20;
-    const cols = 4;
-    const startX = clipX + (clipW - (cols * cardW + (cols - 1) * gapX)) / 2;
 
     for (let i = 0; i < displayIds.length; i++) {
       const bId = displayIds[i];
@@ -4961,201 +5821,158 @@ class Game {
       const cx = startX + col * (cardW + gapX);
       const cy = clipY + 10 + row * (cardH + gapY) - this.codexScrollY;
 
-      if (cy + cardH < clipY || cy > clipY + clipH) continue; // Culling ngoài màn hình
+      if (cy + cardH < clipY || cy > clipY + clipH) continue; // Culling
 
       const isUnlocked = this.bookSystem.unlockedCodex.has(bId);
+      const coverX = cx + Math.round((cardW - coverW) / 2);
+      const coverY = cy + 4;
 
       if (isUnlocked) {
-        this.ctx.fillStyle = 'rgba(22, 28, 42, 0.94)';
+        // Nền thẻ kính mờ sang trọng
+        this.ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
         this.ctx.fillRect(cx, cy, cardW, cardH);
-        this.ctx.strokeStyle = '#d4af37';
-        this.ctx.lineWidth = 1.5;
-        this.ctx.strokeRect(cx, cy, cardW, cardH);
-
-        // Bìa sách bên trái (Khổ dọc portrait)
-        this.bookSystem.renderBookCard(this.ctx, bId, cx + 14, cy + 15, 138, 190, false);
-
-        // Thông tin bên phải
-        const textX = cx + 168;
-        const maxTextW = cardW - 180;
-
-        // Tên tác phẩm
-        this.ctx.fillStyle = '#ffd166';
-        this.ctx.font = 'bold 16px "Playfair Display", Georgia, "Times New Roman", serif';
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText(def.work, textX, cy + 32, maxTextW);
-
-        // Tác giả
-        this.ctx.fillStyle = '#cbd5e1';
-        this.ctx.font = 'italic 13px "Segoe UI", sans-serif';
-        this.ctx.fillText(`✍️ Tác giả: ${def.author}`, textX, cy + 56, maxTextW);
-
-        // Kẻ viền ngăn cách tinh tế
-        this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.2)';
-        this.ctx.lineWidth = 1;
-        this.ctx.beginPath();
-        this.ctx.moveTo(textX, cy + 68);
-        this.ctx.lineTo(cx + cardW - 16, cy + 68);
-        this.ctx.stroke();
-
-        // Chỉ số buff (Wrap từng dòng rõ ràng, không truyền maxWidth vào fillText gây nén dẹt chữ)
-        this.ctx.fillStyle = '#4ade80';
-        this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
-        const buffWords = (def.desc || def.buffDesc || '').split(' ');
-        let bLine = '✨ ';
-        let bY = cy + 90;
-        let lineCount = 0;
-        for (const w of buffWords) {
-          const test = bLine + w + ' ';
-          if (this.ctx.measureText(test).width > maxTextW) {
-            this.ctx.fillText(bLine, textX, bY);
-            bLine = w + ' ';
-            bY += 16;
-            lineCount++;
-            if (lineCount >= 3) break;
-          } else {
-            bLine = test;
-          }
-        }
-        if (lineCount < 3 && bLine.trim()) {
-          this.ctx.fillText(bLine, textX, bY);
-          bY += 16;
-        }
-
-        // Điều kiện tiến hóa / Gợi ý bấm xem chi tiết
-        this.ctx.fillStyle = '#38bdf8';
-        this.ctx.font = '11.5px "Segoe UI", sans-serif';
-        const condText = def.evolutionDesc ? `🔑 ${def.evolutionDesc}` : (def.fusionIngredients ? '🔮 Hợp thể thần thoại' : '🔑 Sách khởi đầu');
-        if (this.ctx.measureText(condText).width > maxTextW) {
-          this.ctx.fillText(condText.substring(0, 32) + '...', textX, cy + 158);
-        } else {
-          this.ctx.fillText(condText, textX, cy + 158);
-        }
-
-        this.ctx.fillStyle = '#fde047';
-        this.ctx.font = 'italic 11.5px "Segoe UI", sans-serif';
-        this.ctx.fillText('🔍 Nhấp thẻ để xem chi tiết', textX, cy + 182);
-
-        // Đẩy hitbox click xem chi tiết
-        this.menuButtons.push({ x: cx, y: cy, w: cardW, h: cardH, id: 'codex_inspect_' + bId });
-      } else {
-        // Thẻ đang khóa
-        this.ctx.fillStyle = 'rgba(12, 16, 26, 0.9)';
-        this.ctx.fillRect(cx, cy, cardW, cardH);
-        this.ctx.strokeStyle = '#1e293b';
+        this.ctx.strokeStyle = '#334155';
         this.ctx.lineWidth = 1.2;
         this.ctx.strokeRect(cx, cy, cardW, cardH);
 
-        // Khung sách da bóng silhouette cổ điển
-        const bookX = cx + 14;
-        const bookY = cy + 15;
-        const bookW = 138;
-        const bookH = 190;
-        const bookGrad = this.ctx.createLinearGradient(bookX, bookY, bookX + bookW, bookY + bookH);
+        // 1. Bìa sách trung tâm (Không chữ thừa ở trên, tên ở giữa, năm ở dưới)
+        this.bookSystem.renderBookCard(this.ctx, bId, coverX, coverY, coverW, coverH, false);
+
+        // 2. Tên tác giả màu vàng bên dưới bìa sách (Theo đúng Ảnh 1)
+        this.ctx.fillStyle = '#ffd166';
+        this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(def.author, cx + cardW / 2, coverY + coverH + 32, cardW - 14);
+
+        // Đăng ký tương tác bấm vào để xem full chi tiết (giới hạn tuyệt đối trong vùng hiển thị clip)
+        const btnY = Math.max(clipY, cy);
+        const btnBottom = Math.min(clipY + clipH, cy + cardH);
+        const btnH = btnBottom - btnY;
+        if (btnH >= 35) {
+          this.menuButtons.push({ x: cx, y: btnY, w: cardW, h: btnH, id: 'codex_inspect_' + bId });
+        }
+      } else {
+        // Thẻ đang khóa
+        this.ctx.fillStyle = 'rgba(10, 15, 26, 0.45)';
+        this.ctx.fillRect(cx, cy, cardW, cardH);
+        this.ctx.strokeStyle = '#1e293b';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(cx, cy, cardW, cardH);
+
+        // Khung bìa sách da bóng silhouette cổ điển
+        const bookGrad = this.ctx.createLinearGradient(coverX, coverY, coverX + coverW, coverY + coverH);
         bookGrad.addColorStop(0, '#1e293b');
         bookGrad.addColorStop(1, '#0f172a');
         this.ctx.fillStyle = bookGrad;
-        this.ctx.fillRect(bookX, bookY, bookW, bookH);
+        this.ctx.fillRect(coverX, coverY, coverW, coverH);
 
-        // Gáy sách cổ điển
+        // Gáy sách & viền
         this.ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-        this.ctx.fillRect(bookX, bookY, 6, bookH);
-
-        // Khung viền chỉ vàng mờ bên trong bìa
+        this.ctx.fillRect(coverX, coverY, 6, coverH);
         this.ctx.strokeStyle = 'rgba(212, 175, 55, 0.35)';
         this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(bookX + 8, bookY + 8, bookW - 16, bookH - 16);
+        this.ctx.strokeRect(coverX + 8, coverY + 8, coverW - 16, coverH - 16);
 
         // Ổ khóa vàng nổi bật
         this.ctx.fillStyle = '#fbbf24';
-        this.ctx.font = '32px sans-serif';
+        this.ctx.font = '36px sans-serif';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText('🔒', bookX + bookW / 2, bookY + bookH / 2 - 4);
+        this.ctx.fillText('🔒', coverX + coverW / 2, coverY + coverH / 2 - 4);
 
         this.ctx.fillStyle = '#94a3b8';
-        this.ctx.font = 'bold 11px "Segoe UI", sans-serif';
-        this.ctx.fillText('CHƯA KHÁM PHÁ', bookX + bookW / 2, bookY + bookH / 2 + 30);
+        this.ctx.font = 'bold 12px "Nunito", sans-serif';
+        this.ctx.fillText('CHƯA KHÁM PHÁ', coverX + coverW / 2, coverY + coverH / 2 + 32);
 
-        // Chữ bên phải với typography thanh lịch
-        const textX = cx + 168;
-        const maxTextW = cardW - 180;
-
+        // Tác giả bên dưới
         this.ctx.fillStyle = '#94a3b8';
-        this.ctx.font = 'bold 16px "Playfair Display", Georgia, "Times New Roman", serif';
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText('???', textX, cy + 34);
+        this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('???', cx + cardW / 2, coverY + coverH + 26);
 
         this.ctx.fillStyle = '#64748b';
-        this.ctx.font = '13px "Segoe UI", sans-serif';
-        this.ctx.fillText('Tác giả: Ẩn Danh', textX, cy + 58);
+        this.ctx.font = '13px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.fillText('Tác giả: Ẩn Danh', cx + cardW / 2, coverY + coverH + 46);
 
-        // Kẻ viền ngăn cách tinh tế
-        this.ctx.strokeStyle = 'rgba(71, 85, 105, 0.3)';
-        this.ctx.lineWidth = 1;
-        this.ctx.beginPath();
-        this.ctx.moveTo(textX, cy + 70);
-        this.ctx.lineTo(cx + cardW - 16, cy + 70);
-        this.ctx.stroke();
-
-        this.ctx.fillStyle = '#94a3b8';
-        this.ctx.font = '12px "Segoe UI", sans-serif';
-        this.ctx.fillText('• Thu thập sách trong trận để mở khóa', textX, cy + 96, maxTextW);
-
-        this.ctx.fillStyle = '#64748b';
-        this.ctx.font = 'italic 12px "Segoe UI", sans-serif';
-        this.ctx.fillText('• Điều kiện tiến cấp: Bí ẩn', textX, cy + 128, maxTextW);
+        // Giới hạn tuyệt đối trong vùng hiển thị clip
+        const btnY = Math.max(clipY, cy);
+        const btnBottom = Math.min(clipY + clipH, cy + cardH);
+        const btnH = btnBottom - btnY;
+        if (btnH >= 35) {
+          this.menuButtons.push({ x: cx, y: btnY, w: cardW, h: btnH, id: 'codex_inspect_' + bId });
+        }
       }
     }
 
     this.ctx.restore();
 
-    // Thanh điều khiển Cuộn Lên / Xuống & Nút Quay Về
-    const scrollBtnW = 160;
-    const scrollBtnH = 46;
-    const scrollBtnY = this.canvas.height - 90;
+    // THANH ĐIỀU KHIỂN & ĐIỀU HƯỚNG DƯỚI CÙNG (Dải nền cố định nổi khối, không bị chìm)
+    const footerH = 92;
+    const footerY = this.canvas.height - footerH;
 
-    // Nút Cuộn Lên
-    const upBtnX = this.canvas.width / 2 - 280;
-    this.ctx.fillStyle = '#1e293b';
-    this.ctx.fillRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
-    this.ctx.strokeStyle = '#64748b';
+    this.ctx.fillStyle = 'rgba(8, 11, 20, 0.95)';
+    this.ctx.fillRect(0, footerY, this.canvas.width, footerH);
+    this.ctx.strokeStyle = 'rgba(51, 65, 85, 0.65)';
     this.ctx.lineWidth = 1.5;
-    this.ctx.strokeRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
-    this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.font = 'bold 15px sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('▲ CUỘN LÊN', upBtnX + scrollBtnW / 2, scrollBtnY + 28);
-    this.menuButtons.push({ x: upBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_up' });
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, footerY);
+    this.ctx.lineTo(this.canvas.width, footerY);
+    this.ctx.stroke();
 
-    // Nút Cuộn Xuống
-    const downBtnX = this.canvas.width / 2 + 120;
-    this.ctx.fillStyle = '#1e293b';
-    this.ctx.fillRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
-    this.ctx.strokeStyle = '#64748b';
-    this.ctx.lineWidth = 1.5;
-    this.ctx.strokeRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
-    this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.font = 'bold 15px sans-serif';
-    this.ctx.fillText('▼ CUỘN XUỐNG', downBtnX + scrollBtnW / 2, scrollBtnY + 28);
-    this.menuButtons.push({ x: downBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_down' });
-
-    // Nút Quay Về Menu Chính
-    const backBtnW = 300;
-    const backBtnH = 52;
-    const backBtnX = 60;
-    const backBtnY = this.canvas.height - 90;
+    // Nút Quay Về Menu Chính (Nổi bật, sáng rõ, kích thước lớn)
+    const backBtnW = 320;
+    const backBtnH = 54;
+    const backBtnX = 70;
+    const backBtnY = footerY + Math.round((footerH - backBtnH) / 2);
 
     this.ctx.fillStyle = '#334155';
     this.ctx.fillRect(backBtnX, backBtnY, backBtnW, backBtnH);
-    this.ctx.strokeStyle = '#64748b';
+    this.ctx.strokeStyle = '#94a3b8';
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(backBtnX, backBtnY, backBtnW, backBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 18px sans-serif';
-    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', backBtnX + backBtnW / 2, backBtnY + 33);
+    this.ctx.font = 'bold 19px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', backBtnX + backBtnW / 2, backBtnY + 35);
     this.menuButtons.push({ x: backBtnX, y: backBtnY, w: backBtnW, h: backBtnH, id: 'back_to_menu' });
 
-    // Modal Xem Chi Tiết Tác Phẩm nếu người chơi đã nhấp vào một cuốn sách đã mở khóa
+    // Nút Cuộn Lên / Cuộn Xuống (Căn giữa cân đối trong thanh điều khiển)
+    const scrollBtnW = 200;
+    const scrollBtnH = 50;
+    const scrollBtnY = footerY + Math.round((footerH - scrollBtnH) / 2);
+    const scrollGap = 28;
+
+    // Nút Cuộn Lên
+    const upBtnX = this.canvas.width / 2 - scrollBtnW - scrollGap / 2;
+    const canScrollUp = this.codexScrollY > 5;
+    this.ctx.fillStyle = canScrollUp ? '#1e293b' : 'rgba(15, 23, 42, 0.5)';
+    this.ctx.fillRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.strokeStyle = canScrollUp ? '#64748b' : '#334155';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(upBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.fillStyle = canScrollUp ? '#ffd166' : '#475569';
+    this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('▲ CUỘN LÊN', upBtnX + scrollBtnW / 2, scrollBtnY + 31);
+    if (canScrollUp) {
+      this.menuButtons.push({ x: upBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_up' });
+    }
+
+    // Nút Cuộn Xuống
+    const downBtnX = this.canvas.width / 2 + scrollGap / 2;
+    const canScrollDown = this.codexScrollY < maxScroll - 5;
+    this.ctx.fillStyle = canScrollDown ? '#1e293b' : 'rgba(15, 23, 42, 0.5)';
+    this.ctx.fillRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.strokeStyle = canScrollDown ? '#64748b' : '#334155';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(downBtnX, scrollBtnY, scrollBtnW, scrollBtnH);
+    this.ctx.fillStyle = canScrollDown ? '#ffd166' : '#475569';
+    this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('▼ CUỘN XUỐNG', downBtnX + scrollBtnW / 2, scrollBtnY + 31);
+    if (canScrollDown) {
+      this.menuButtons.push({ x: downBtnX, y: scrollBtnY, w: scrollBtnW, h: scrollBtnH, id: 'codex_scroll_down' });
+    }
+
+    // Modal Xem Chi Tiết Tác Phẩm nếu người chơi đã nhấp vào một cuốn sách
     if (this.selectedCodexBook) {
       this.renderCodexDetailModal(this.selectedCodexBook);
     }
@@ -5164,7 +5981,7 @@ class Game {
   }
 
   // =========================================================================
-  // MODAL CHI TIẾT TÁC PHẨM TRONG THƯ VIỆN CODEX
+  // MODAL CHI TIẾT TÁC PHẨM TRONG THƯ VIỆN CODEX (ĐÃ BỎ NÚT "ĐÃ HIỂU", BỎ CHỮ TRÊN BÌA)
   // =========================================================================
   renderCodexDetailModal(bId) {
     const def = BOOK_DEFINITIONS[bId];
@@ -5176,8 +5993,9 @@ class Game {
     this.ctx.fillStyle = 'rgba(5, 7, 14, 0.90)';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+    const isUnlocked = this.bookSystem.unlockedCodex.has(bId);
     const modalW = 1040;
-    const modalH = 650;
+    const modalH = 580;
     const modalX = Math.round((this.canvas.width - modalW) / 2);
     const modalY = Math.round((this.canvas.height - modalH) / 2);
     this.codexDetailBox = { x: modalX, y: modalY, w: modalW, h: modalH };
@@ -5189,138 +6007,181 @@ class Game {
     this.ctx.lineWidth = 3;
     this.ctx.strokeRect(modalX, modalY, modalW, modalH);
 
+    // Nút đóng ✕ ở góc trên bên phải (Thay thế cho nút "ĐÃ HIỂU" thừa thãi)
+    const closeBtnSize = 44;
+    const closeBtnX = modalX + modalW - closeBtnSize - 20;
+    const closeBtnY = modalY + 20;
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.fillRect(closeBtnX, closeBtnY, closeBtnSize, closeBtnSize);
+    this.ctx.strokeStyle = '#475569';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(closeBtnX, closeBtnY, closeBtnSize, closeBtnSize);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 24px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('✕', closeBtnX + closeBtnSize / 2, closeBtnY + 31);
+    this.codexDetailCloseBtn = { x: closeBtnX, y: closeBtnY, w: closeBtnSize, h: closeBtnSize };
+    this.menuButtons.push({ x: closeBtnX, y: closeBtnY, w: closeBtnSize, h: closeBtnSize, id: 'close_codex_detail' });
+
     // Bìa sách lớn bên trái (Khổ dọc portrait 1 : 1.4)
     const coverW = 200;
     const coverH = 280;
     const coverX = modalX + 50;
-    const coverY = modalY + 65;
-    this.bookSystem.renderBookCard(this.ctx, bId, coverX, coverY, coverW, coverH, true);
+    const coverY = modalY + 60;
 
-    // Nhãn Trạng Thái dưới bìa sách
-    this.ctx.fillStyle = '#4ade80';
-    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('✨ ĐÃ KHÁM PHÁ ✨', coverX + coverW / 2, coverY + coverH + 34);
+    if (isUnlocked) {
+      this.bookSystem.renderBookCard(this.ctx, bId, coverX, coverY, coverW, coverH, true);
+    } else {
+      // Silhouette bìa sách khóa
+      const bookGrad = this.ctx.createLinearGradient(coverX, coverY, coverX + coverW, coverY + coverH);
+      bookGrad.addColorStop(0, '#1e293b');
+      bookGrad.addColorStop(1, '#0f172a');
+      this.ctx.fillStyle = bookGrad;
+      this.ctx.fillRect(coverX, coverY, coverW, coverH);
+      this.ctx.strokeStyle = 'rgba(212, 175, 55, 0.4)';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(coverX + 10, coverY + 10, coverW - 20, coverH - 20);
+      this.ctx.fillStyle = '#fbbf24';
+      this.ctx.font = '48px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('🔒', coverX + coverW / 2, coverY + coverH / 2);
+    }
 
     // Khu vực thông tin bên phải
     const infoX = coverX + coverW + 45;
-    const maxInfoW = modalW - (coverW + 145);
+    const maxInfoW = modalW - (coverW + 155);
 
-    // 1. Tên tác phẩm ngôn ngữ gốc
-    this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 30px "Playfair Display", Georgia, "Times New Roman", serif';
-    this.ctx.textAlign = 'left';
-    this.ctx.fillText(def.work, infoX, modalY + 75, maxInfoW);
-
-    // 2. Tác giả & Bậc tác phẩm
-    this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.font = 'italic 18px "Segoe UI", sans-serif';
-    this.ctx.fillText(`✍️ Tác giả: ${def.author}`, infoX, modalY + 110);
-
-    let tierLabel = '📘 Bậc: Tác Phẩm Khởi Đầu';
-    let tierColor = '#38bdf8';
-    if (def.fusionIngredients || bId === 'camus' || bId === 'adam_smith' || bId === 'sartre') {
-      tierLabel = '🔮 Bậc: Tác Phẩm Hợp Thể / Thần Thoại Ẩn';
-      tierColor = '#f59e0b';
-    } else if (!STARTER_BOOK_IDS.includes(bId)) {
-      tierLabel = '📙 Bậc: Tác Phẩm Tiến Hóa Cổ Điển';
-      tierColor = '#c084fc';
-    }
-
-    this.ctx.fillStyle = tierColor;
-    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
-    this.ctx.fillText(tierLabel, infoX, modalY + 138);
-
-    // Đường kẻ phân cách vàng kim
-    this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
-    this.ctx.lineWidth = 1.5;
-    this.ctx.beginPath();
-    this.ctx.moveTo(infoX, modalY + 154);
-    this.ctx.lineTo(modalX + modalW - 50, modalY + 154);
-    this.ctx.stroke();
-
-    // 3. Hiệu lực & Chỉ số Buff
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
-    this.ctx.fillText('📖 HIỆU LỰC & CHỈ SỐ BUFF:', infoX, modalY + 185);
-
-    this.ctx.fillStyle = '#4ade80';
-    this.ctx.font = '15px "Segoe UI", sans-serif';
-    const descWords = (def.desc || def.buffDesc || '').split(' ');
-    let line = '✨ ';
-    let curY = modalY + 215;
-    for (const w of descWords) {
-      const test = line + w + ' ';
-      if (this.ctx.measureText(test).width > maxInfoW) {
-        this.ctx.fillText(line, infoX, curY);
-        line = w + ' ';
-        curY += 25;
-      } else {
-        line = test;
+    // Helper vẽ văn bản tự động xuống dòng
+    const drawWrappedText = (text, x, y, maxWidth, lineHeight) => {
+      const words = text.split(' ');
+      let curLine = '';
+      let curY = y;
+      for (let n = 0; n < words.length; n++) {
+        const testLine = curLine + words[n] + ' ';
+        if (this.ctx.measureText(testLine).width > maxWidth && n > 0) {
+          this.ctx.fillText(curLine.trim(), x, curY);
+          curLine = words[n] + ' ';
+          curY += lineHeight;
+        } else {
+          curLine = testLine;
+        }
       }
-    }
-    if (line.trim()) {
-      this.ctx.fillText(line, infoX, curY);
-      curY += 25;
-    }
+      this.ctx.fillText(curLine.trim(), x, curY);
+      return curY + lineHeight;
+    };
 
-    // 4. Cơ chế tiến cấp hoặc nguồn gốc hợp thể
-    curY += 15;
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
-    this.ctx.fillText('🔮 NGUỒN GỐC & CƠ CHẾ TIẾN CẤP:', infoX, curY);
-    curY += 30;
+    if (!isUnlocked) {
+      // Thông tin sách chưa mở khóa
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = 'bold 34px "Playfair Display", Georgia, serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText('Tác Phẩm Chưa Khám Phá', infoX, modalY + 80, maxInfoW);
 
-    let originText = '';
-    if (def.fusionIngredients && def.fusionIngredients.length > 0) {
-      const ingNames = def.fusionIngredients.map(id => {
-        const b = BOOK_DEFINITIONS[id];
-        return b ? `${b.work} (${b.author})` : id;
-      }).join('  +  ');
-      originText = `Hợp thể bí truyền từ: ${ingNames}.`;
-    } else if (def.evolutionDesc) {
-      originText = `Điều kiện tiến cấp: ${def.evolutionDesc}.`;
-    } else if (STARTER_BOOK_IDS.includes(bId)) {
-      originText = 'Tác phẩm bậc khởi đầu (Có thể chọn mang theo trước trận hoặc nhặt được khi tiêu diệt quái).';
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = 'bold 18px "Nunito", sans-serif';
+      this.ctx.fillText('Tác giả: Ẩn Danh', infoX, modalY + 120);
+
+      this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(infoX, modalY + 140);
+      this.ctx.lineTo(modalX + modalW - 50, modalY + 140);
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#fbbf24';
+      this.ctx.font = 'bold 18px "Nunito", sans-serif';
+      this.ctx.fillText('🔒 HƯỚNG DẪN MỞ KHÓA:', infoX, modalY + 185);
+
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = '16px "Nunito", sans-serif';
+      drawWrappedText('Hãy thu thập tác phẩm này trong trận đấu hoặc hoàn thành điều kiện tiến cấp để giải phóng toàn bộ sức mạnh và ghi danh vào Thư Viện!', infoX, modalY + 220, maxInfoW, 28);
     } else {
-      originText = 'Thức tỉnh theo điều kiện bí ẩn trong trận chiến.';
-    }
+      // 1. Tên tác phẩm ngôn ngữ gốc (Không có chữ thừa ở trên)
+      this.ctx.fillStyle = '#ffd166';
+      this.ctx.font = 'bold 34px "Playfair Display", "Nunito", Georgia, serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(def.work, infoX, modalY + 80, maxInfoW);
 
-    this.ctx.fillStyle = '#38bdf8';
-    this.ctx.font = '14px "Segoe UI", sans-serif';
-    const origWords = originText.split(' ');
-    let oLine = '🔑 ';
-    for (const w of origWords) {
-      const test = oLine + w + ' ';
-      if (this.ctx.measureText(test).width > maxInfoW) {
-        this.ctx.fillText(oLine, infoX, curY);
-        oLine = w + ' ';
-        curY += 22;
+      // 2. Tác giả
+      this.ctx.fillStyle = '#cbd5e1';
+      this.ctx.font = 'bold 20px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText(`Tác giả: ${def.author}`, infoX, modalY + 120);
+
+      // Đường kẻ phân cách vàng kim
+      this.ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(infoX, modalY + 140);
+      this.ctx.lineTo(modalX + modalW - 50, modalY + 140);
+      this.ctx.stroke();
+
+      // 3. Hiệu lực & Chỉ số Buff vĩnh viễn (Chữ to, rõ nét, màu ngọc lục bảo)
+      this.ctx.fillStyle = '#f59e0b';
+      this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+      this.ctx.fillText('✨ HIỆU LỰC & CHỈ SỐ BUFF (VĨNH VIỄN):', infoX, modalY + 175);
+
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
+      const buffText = def.desc || def.buffDesc || '';
+      const nextY = drawWrappedText(buffText, infoX, modalY + 208, maxInfoW, 26);
+
+      // 4. LOGIC TIẾN HÓA THEO ĐÚNG YÊU CẦU:
+      // - Nếu là sách A (Khởi đầu): HOÀN TOÀN KHÔNG HIỆN CÁCH LÊN B!
+      // - Nếu là sách B (Tiến hóa): HIỆN RÕ CÁCH TỪ A BIẾN THÀNH B!
+      const isStarterBook = STARTER_BOOK_IDS.includes(bId);
+
+      if (isStarterBook) {
+        // Tác phẩm A: Chỉ hiện thông báo tác phẩm khởi đầu thanh nhã
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = 'italic 15px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.fillText('📖 Tác phẩm bậc khởi đầu. Hãy mang theo trong trận đấu để tự mình khám phá bí ẩn tiến cấp!', infoX, Math.max(nextY + 25, modalY + 310));
       } else {
-        oLine = test;
+        // Tác phẩm B hoặc Hợp thể: Truy tìm tác phẩm nguồn gốc A
+        let sourceBook = null;
+        let condText = '';
+
+        for (const [srcId, srcDef] of Object.entries(BOOK_DEFINITIONS)) {
+          if (srcDef.evolutionTarget === bId) {
+            sourceBook = srcDef;
+            if (srcDef.reqKillCount) condText = `Tiêu diệt đủ ${srcDef.reqKillCount} quái vật`;
+            if (srcDef.reqTime) condText = `Sinh tồn ít nhất ${srcDef.reqTime} giây`;
+            if (srcDef.timeLimitSeconds) condText = `Tiêu diệt ${srcDef.reqKillCount} quái vật trong ${srcDef.timeLimitSeconds} giây`;
+            if (srcDef.evolutionDesc) condText = srcDef.evolutionDesc;
+            break;
+          } else if (srcDef.branchTargets && srcDef.branchTargets.includes(bId)) {
+            sourceBook = srcDef;
+            if (srcDef.reqKillCount) condText = `Tiêu diệt đủ ${srcDef.reqKillCount} quái vật`;
+            if (srcDef.evolutionDesc) condText = srcDef.evolutionDesc;
+            break;
+          }
+        }
+
+        let originText = '';
+        if (def.fusionIngredients && def.fusionIngredients.length > 0) {
+          const ingNames = def.fusionIngredients.map(id => {
+            const b = BOOK_DEFINITIONS[id];
+            return b ? `[${b.work}] (${b.author}, Cấp 5)` : id;
+          }).join('  +  ');
+          originText = `Hợp thể Thần Thoại từ 2 tác phẩm: ${ingNames}.`;
+        } else if (sourceBook) {
+          originText = `Tiến hóa từ tác phẩm [${sourceBook.work}] (${sourceBook.author}) khi nâng cấp tối đa${condText ? ' + ' + condText : ''}.`;
+        } else if (def.evolutionDesc) {
+          originText = `Điều kiện tiến cấp: ${def.evolutionDesc}.`;
+        } else {
+          originText = 'Thức tỉnh theo điều kiện bí ẩn trong trận chiến.';
+        }
+
+        const evoY = Math.max(nextY + 25, modalY + 300);
+        this.ctx.fillStyle = '#c084fc';
+        this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+        this.ctx.fillText('⚡ CÔNG THỨC & NGUỒN GỐC TIẾN HÓA:', infoX, evoY);
+
+        this.ctx.fillStyle = '#e9d5ff';
+        this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+        drawWrappedText(originText, infoX, evoY + 30, maxInfoW, 25);
       }
     }
-    if (oLine.trim()) {
-      this.ctx.fillText(oLine, infoX, curY);
-    }
 
-    // Nút Đóng Modal
-    const closeBtnW = 200;
-    const closeBtnH = 50;
-    const closeBtnX = modalX + modalW / 2 - closeBtnW / 2;
-    const closeBtnY = modalY + modalH - 75;
-
-    this.ctx.fillStyle = '#7f1d1d';
-    this.ctx.fillRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
-    this.ctx.strokeStyle = '#f87171';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(closeBtnX, closeBtnY, closeBtnW, closeBtnH);
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('✖ ĐÓNG (ESC)', closeBtnX + closeBtnW / 2, closeBtnY + 31);
-
-    this.codexDetailCloseBtn = { x: closeBtnX, y: closeBtnY, w: closeBtnW, h: closeBtnH };
     this.ctx.restore();
   }
 }

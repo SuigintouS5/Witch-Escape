@@ -9,6 +9,7 @@ export class Spawner {
     this.challenges = challenges || {};
 
     this.spawnTimer = 0;
+    this.curseEnemyCount = 0; // Thêm quái vật theo Nâng Cấp Nguyền Rủa từ Shop Cổ Viện
     this.recalculateRates();
 
     // Quản lý các mốc kịch bản Timeline đã kích hoạt
@@ -222,8 +223,14 @@ export class Spawner {
 
     if (this.spawnTimer <= 0) {
       this.spawnTimer = currentInterval;
-      const single = this.spawnSingleEnemy(gameTime, camera);
-      return single ? [single] : null;
+      const countToSpawn = 1 + (this.curseEnemyCount || 0);
+      const spawned = [];
+      for (let i = 0; i < countToSpawn; i++) {
+        if (enemies.length + spawned.length >= maxEnemies) break;
+        const single = this.spawnSingleEnemy(gameTime, camera);
+        if (single) spawned.push(single);
+      }
+      return spawned.length > 0 ? spawned : null;
     }
 
     return null;

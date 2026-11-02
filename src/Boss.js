@@ -126,7 +126,7 @@ export class MiniBoss {
     return finalAmount;
   }
 
-  update(delta, player, allEnemies, onShootCallback) {
+  update(delta, player, allEnemies, onShootCallback, particles = null) {
     if (this.isDead) return;
 
     if (this.hitFlashTimer > 0) this.hitFlashTimer -= delta;
@@ -139,15 +139,54 @@ export class MiniBoss {
     }
     if (this.bleedTimer > 0) {
       this.bleedTimer -= delta;
-      const bleedDmg = this.maxHealth * 0.0008 * this.bleedStacks;
-      this.health -= bleedDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
       if (this.bleedTimer <= 0) this.bleedStacks = 0;
     }
     if (this.zoneDotTimer > 0) {
       this.zoneDotTimer -= delta;
-      this.health -= this.zoneDotDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+    }
+
+    if (this.bleedTimer > 0 || this.zoneDotTimer > 0) {
+      this.dotTickTimer = (this.dotTickTimer || 0) + delta;
+      if (this.dotTickTimer >= 0.4) {
+        const tickRatio = this.dotTickTimer;
+        this.dotTickTimer = 0;
+
+        const dotDmgMult = 1.0 + (player && player.bookStats ? (player.bookStats.dotDmgMult || 0) : 0);
+        let tickDmg = 0;
+
+        if (this.bleedTimer > 0) {
+          tickDmg += (this.maxHealth * 0.0008 * this.bleedStacks * dotDmgMult) * tickRatio;
+        }
+        if (this.zoneDotTimer > 0) {
+          tickDmg += (this.zoneDotDmg * dotDmgMult) * tickRatio;
+        }
+
+        if (tickDmg > 0 && !this.isDead) {
+          let isCrit = false;
+          let critTier = 0;
+          if (player && player.bookStats && player.bookStats.dotCanCrit) {
+            const totalCritChance = (player.critChance || 0) + (player.bookStats.critChance || 0);
+            if (totalCritChance > 0) {
+              const tiers = Math.floor(totalCritChance);
+              const extra = totalCritChance - tiers;
+              critTier = tiers + (Math.random() < extra ? 1 : 0);
+              if (critTier > 0) {
+                isCrit = true;
+                const totalCritDamage = (player.critDamage || 1.5) + (player.bookStats.critDamage || 0);
+                tickDmg *= Math.pow(totalCritDamage, critTier);
+              }
+            }
+          }
+          const actualDmg = Math.max(1, Math.round(tickDmg));
+          this.health -= actualDmg;
+          if (particles && particles.createDamageNumber) {
+            particles.createDamageNumber(this.x, this.y - 18, actualDmg, isCrit, false, false, false, isCrit ? null : '#ff8533', critTier);
+          }
+          if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+        }
+      }
+    } else {
+      this.dotTickTimer = 0;
     }
 
     this.walkCycle += delta * 4;
@@ -417,15 +456,54 @@ export class MeruruBoss {
     }
     if (this.bleedTimer > 0) {
       this.bleedTimer -= delta;
-      const bleedDmg = this.maxHealth * 0.0005 * this.bleedStacks;
-      this.health -= bleedDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
       if (this.bleedTimer <= 0) this.bleedStacks = 0;
     }
     if (this.zoneDotTimer > 0) {
       this.zoneDotTimer -= delta;
-      this.health -= this.zoneDotDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+    }
+
+    if (this.bleedTimer > 0 || this.zoneDotTimer > 0) {
+      this.dotTickTimer = (this.dotTickTimer || 0) + delta;
+      if (this.dotTickTimer >= 0.4) {
+        const tickRatio = this.dotTickTimer;
+        this.dotTickTimer = 0;
+
+        const dotDmgMult = 1.0 + (player && player.bookStats ? (player.bookStats.dotDmgMult || 0) : 0);
+        let tickDmg = 0;
+
+        if (this.bleedTimer > 0) {
+          tickDmg += (this.maxHealth * 0.0005 * this.bleedStacks * dotDmgMult) * tickRatio;
+        }
+        if (this.zoneDotTimer > 0) {
+          tickDmg += (this.zoneDotDmg * dotDmgMult) * tickRatio;
+        }
+
+        if (tickDmg > 0 && !this.isDead) {
+          let isCrit = false;
+          let critTier = 0;
+          if (player && player.bookStats && player.bookStats.dotCanCrit) {
+            const totalCritChance = (player.critChance || 0) + (player.bookStats.critChance || 0);
+            if (totalCritChance > 0) {
+              const tiers = Math.floor(totalCritChance);
+              const extra = totalCritChance - tiers;
+              critTier = tiers + (Math.random() < extra ? 1 : 0);
+              if (critTier > 0) {
+                isCrit = true;
+                const totalCritDamage = (player.critDamage || 1.5) + (player.bookStats.critDamage || 0);
+                tickDmg *= Math.pow(totalCritDamage, critTier);
+              }
+            }
+          }
+          const actualDmg = Math.max(1, Math.round(tickDmg));
+          this.health -= actualDmg;
+          if (particles && particles.createDamageNumber) {
+            particles.createDamageNumber(this.x, this.y - 20, actualDmg, isCrit, false, false, false, isCrit ? null : '#ff8533', critTier);
+          }
+          if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+        }
+      }
+    } else {
+      this.dotTickTimer = 0;
     }
 
     this.walkCycle += delta * 3;
@@ -814,15 +892,54 @@ export class YukiBoss {
     }
     if (this.bleedTimer > 0) {
       this.bleedTimer -= delta;
-      const bleedDmg = this.maxHealth * 0.0003 * this.bleedStacks;
-      this.health -= bleedDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
       if (this.bleedTimer <= 0) this.bleedStacks = 0;
     }
     if (this.zoneDotTimer > 0) {
       this.zoneDotTimer -= delta;
-      this.health -= this.zoneDotDmg * delta;
-      if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+    }
+
+    if (this.bleedTimer > 0 || this.zoneDotTimer > 0) {
+      this.dotTickTimer = (this.dotTickTimer || 0) + delta;
+      if (this.dotTickTimer >= 0.4) {
+        const tickRatio = this.dotTickTimer;
+        this.dotTickTimer = 0;
+
+        const dotDmgMult = 1.0 + (player && player.bookStats ? (player.bookStats.dotDmgMult || 0) : 0);
+        let tickDmg = 0;
+
+        if (this.bleedTimer > 0) {
+          tickDmg += (this.maxHealth * 0.0003 * this.bleedStacks * dotDmgMult) * tickRatio;
+        }
+        if (this.zoneDotTimer > 0) {
+          tickDmg += (this.zoneDotDmg * dotDmgMult) * tickRatio;
+        }
+
+        if (tickDmg > 0 && !this.isDead) {
+          let isCrit = false;
+          let critTier = 0;
+          if (player && player.bookStats && player.bookStats.dotCanCrit) {
+            const totalCritChance = (player.critChance || 0) + (player.bookStats.critChance || 0);
+            if (totalCritChance > 0) {
+              const tiers = Math.floor(totalCritChance);
+              const extra = totalCritChance - tiers;
+              critTier = tiers + (Math.random() < extra ? 1 : 0);
+              if (critTier > 0) {
+                isCrit = true;
+                const totalCritDamage = (player.critDamage || 1.5) + (player.bookStats.critDamage || 0);
+                tickDmg *= Math.pow(totalCritDamage, critTier);
+              }
+            }
+          }
+          const actualDmg = Math.max(1, Math.round(tickDmg));
+          this.health -= actualDmg;
+          if (particles && particles.createDamageNumber) {
+            particles.createDamageNumber(this.x, this.y - 25, actualDmg, isCrit, false, false, false, isCrit ? null : '#ff8533', critTier);
+          }
+          if (this.health <= 0) { this.health = 0; this.isDead = true; return; }
+        }
+      }
+    } else {
+      this.dotTickTimer = 0;
     }
 
     this.walkCycle += delta * 3.5;

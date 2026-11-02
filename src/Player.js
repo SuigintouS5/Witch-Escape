@@ -14,14 +14,13 @@ export class Player {
     this.height = char.height || CONFIG.PLAYER.HEIGHT;
 
     // Chỉ số cơ bản có cộng bonus từ Meta Upgrades & Thông Thạo (Mastery)
-    const bonusHp = (metaBonuses ? metaBonuses.bonusHealth : 0) + (this.masteryBonuses.bonusHealth || 0);
     const speedMult = (metaBonuses ? metaBonuses.bonusSpeedMult : 1.0) * (this.masteryBonuses.bonusSpeedMult || 1.0);
     const bonusCrit = (metaBonuses ? metaBonuses.bonusCritChance : 0) + (this.masteryBonuses.bonusCritChance || 0);
     const metaDmg = (metaBonuses && metaBonuses.bonusDamageMult) ? metaBonuses.bonusDamageMult : 1.0;
-    const metaArmor = (metaBonuses && metaBonuses.bonusArmor) ? metaBonuses.bonusArmor : 0;
 
     let calcSpeed = (char.baseSpeed || CONFIG.PLAYER.BASE_SPEED) * speedMult;
-    let calcHp = (char.maxHealth || CONFIG.PLAYER.MAX_HEALTH) + bonusHp;
+    const hpPercentBonus = (metaBonuses && metaBonuses.healthBonusPercent) ? metaBonuses.healthBonusPercent : 0;
+    let calcHp = Math.round(((char.maxHealth || CONFIG.PLAYER.MAX_HEALTH) + (this.masteryBonuses.bonusHealth || 0)) * (1.0 + hpPercentBonus));
 
     // Áp dụng Thử Thách (Challenge Modifiers)
     if (this.challenges.less_speed) {
@@ -41,12 +40,18 @@ export class Player {
     this.noHeal = !!this.challenges.no_heal;
     this.lessDamage = !!this.challenges.less_damage;
     this.moreIncomingDamage = !!this.challenges.more_incoming_damage;
+    this.curseEnemyDamageMult = (metaBonuses && metaBonuses.curseEnemyDamageMult) ? metaBonuses.curseEnemyDamageMult : 1.0;
 
     // --- HỆ THỐNG CHỈ SỐ CHIẾN ĐẤU MỞ RỘNG (COMBAT SYSTEM) ---
-    // Giáp (Điểm Phòng Ngự trừ sát thương cứng = Giáp nhân vật + Giáp Shop Cổ Viện + Giáp Cây Kỹ Năng)
-    this.armor = (char.baseArmor || 0) + metaArmor + (this.masteryBonuses.bonusArmor || 0);
-    // Hệ số Giảm Sát Thương % (độc lập với Giáp)
-    this.damageReduction = this.masteryBonuses.damageReduction || 0;
+    // Giáp (Điểm Phòng Ngự trừ sát thương cứng có tính % cộng từ Shop Cổ Viện)
+    const baseArm = (char.baseArmor || 0) + (this.masteryBonuses.bonusArmor || 0);
+    const armorPct = (metaBonuses && metaBonuses.armorPercentBonus) ? metaBonuses.armorPercentBonus : 0;
+    this.armor = Math.round(baseArm * (1.0 + armorPct));
+
+    // Hệ số Giảm Sát Thương % (độc lập với Giáp, tối đa 50%)
+    const metaDR = (metaBonuses && metaBonuses.damageReduction) ? metaBonuses.damageReduction : 0;
+    this.damageReduction = Math.min(0.50, (this.masteryBonuses.damageReduction || 0) + metaDR);
+
     // Chính Xác & Né Tránh
     this.accuracy = char.accuracy || CONFIG.PLAYER.BASE_ACCURACY || 1.0;
     this.dodge = char.dodgeRate || CONFIG.PLAYER.BASE_DODGE || 0.05;
@@ -59,11 +64,13 @@ export class Player {
 
     // Thông số bổ trợ từ Thông Thạo (Mastery) & Nâng Cấp Vĩnh Viễn (Meta)
     this.lifesteal = this.masteryBonuses.lifesteal || 0;
-    this.masteryRegen = this.masteryBonuses.bonusRegen || 0;
+    const metaHpRegen = (metaBonuses && metaBonuses.hpRegenPerSec) ? metaBonuses.hpRegenPerSec : 0;
+    this.masteryRegen = (this.masteryBonuses.bonusRegen || 0) + metaHpRegen;
     this.metaDmgMult = metaDmg;
     this.masteryDmgMult = 1.0 + (this.masteryBonuses.bonusDamageMult || 0);
     this.totalDmgMult = this.metaDmgMult * this.masteryDmgMult;
     this.pickupRangeBonus = this.masteryBonuses.bonusPickupRange || 0;
+    this.metaPickupRangeMult = (metaBonuses && metaBonuses.bonusPickupRangeMult) ? metaBonuses.bonusPickupRangeMult : 1.0;
     this.specialMasteryLevel = this.masteryBonuses.specialMasteryLevel || 0;
 
     // --- HỆ THỐNG CHỈ SỐ PHẢN SÁT THƯƠNG (REFLECT DAMAGE / THORNS SYSTEM) ---
@@ -135,6 +142,21 @@ export class Player {
     this.bonusGreedMult = 1.0;
     this.metaGoldMult = (metaBonuses && metaBonuses.goldMultiplier) ? metaBonuses.goldMultiplier : 1.0;
     this.cooldownReduction = 0;
+
+    // Kỹ năng đặc biệt riêng của nhân vật (Kích hoạt bằng phím G)
+    const baseCd = 8.0;
+    const finalCd = Math.max(2.0, baseCd * (1.0 - (metaBonuses && metaBonuses.specialSkillCDR ? metaBonuses.specialSkillCDR : 0)));
+    this.specialSkill = {
+      id: 'special_g',
+      name: 'Kỹ Năng Đặc Biệt',
+      hotkey: 'G',
+      cooldown: 0,
+      maxCooldown: finalCd,
+      isUnlocked: !!(metaBonuses && metaBonuses.isSpecialSkillUnlocked),
+      isReady: true,
+      desc: 'Kỹ năng đặc biệt [Phím G] - Đang để trống chờ thiết lập hiệu ứng'
+    };
+    this.enhanceSpecialAndMain = (metaBonuses && metaBonuses.enhanceSpecialAndMain) ? metaBonuses.enhanceSpecialAndMain : 0;
   }
 
   // Kết nối Hệ Thống Sách Tri Thức
@@ -148,6 +170,32 @@ export class Player {
       this.bookStats = this.bookSystemRef.getBonusStats(this);
       if (this.bookStats) {
         this.cooldownReduction = this.bookStats.cooldownReduction || 0;
+      }
+    }
+  }
+
+  // Lấy hệ số tăng kích thước vũ khí & diện tích quét đòn từ Sách Tri Thức
+  getAreaMultiplier() {
+    return (this.bookStats && this.bookStats.areaMult) ? this.bookStats.areaMult : 1.0;
+  }
+
+  // Xử lý hiệu ứng phụ khi đòn đánh vũ khí / đạn trúng quái (VD: Neil Postman 20% thiêu đốt)
+  onHitEnemy(enemy, rawDmg = 50, particles = null) {
+    if (!enemy || enemy.isDead) return;
+    const bookStats = this.bookStats;
+    if (!bookStats) return;
+
+    // Neil Postman: burnChance (20% đòn đánh đốt cháy quái)
+    if (bookStats.burnChance > 0 && Math.random() < bookStats.burnChance) {
+      const durationMult = 1.0 + (bookStats.dotDurationMult || 0);
+      const dotDmgMult = 1.0 + (bookStats.dotDmgMult || 0);
+      const burnDuration = 4.0 * durationMult;
+      const burnDps = Math.max(30, rawDmg * 0.25) * dotDmgMult;
+
+      enemy.zoneDotTimer = Math.max(enemy.zoneDotTimer || 0, burnDuration);
+      enemy.zoneDotDmg = Math.max(enemy.zoneDotDmg || 0, burnDps);
+      if (particles && particles.createHitSparks) {
+        particles.createHitSparks(enemy.x, enemy.y, 10);
       }
     }
   }
@@ -243,6 +291,11 @@ export class Player {
       finalAmount *= 1.5;
     }
 
+    // Tăng sát thương nhận vào từ Nâng Cấp Nguyền Rủa (Curse Enemy Damage: +200%/cấp)
+    if (this.curseEnemyDamageMult && this.curseEnemyDamageMult > 1.0) {
+      finalAmount *= this.curseEnemyDamageMult;
+    }
+
     finalAmount = Math.round(finalAmount);
 
     // 3. Trừ Máu Ảo (Thanh Trắng) trước
@@ -320,6 +373,14 @@ export class Player {
 
     // Cập nhật chỉ số từ Hệ Thống Sách Tri Thức liên tục
     this.updateBookStats();
+
+    // Hồi chiêu kỹ năng đặc biệt [G]
+    if (this.specialSkill) {
+      if (this.specialSkill.cooldown > 0) {
+        this.specialSkill.cooldown = Math.max(0, this.specialSkill.cooldown - delta);
+      }
+      this.specialSkill.isReady = this.specialSkill.cooldown <= 0;
+    }
 
     // Hồi máu liên tục từ Thông Thạo Huyết Mạch Tái Sinh
     if (this.masteryRegen > 0 && !this.noHeal && this.health < this.maxHealth) {

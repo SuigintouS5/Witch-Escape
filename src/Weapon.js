@@ -115,6 +115,10 @@ export class MainSwordWeapon {
     this.projectileCount = 1;
     this.pierce = 2;
     this.hasSlashAura = false; // Mở khóa ở cấp 7
+
+    // Thuộc tính bảo vệ vũ khí chính khởi đầu
+    this.isMainWeapon = true;
+    this.isUnique = true;
   }
 
   upgrade() {
@@ -146,6 +150,8 @@ export class MainSwordWeapon {
 
   update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
     this.timer -= delta;
+    const enhanceMult = (player && player.enhanceSpecialAndMain) ? (1.0 + player.enhanceSpecialAndMain) : 1.0;
+    const effectiveDmgMult = dmgMult * enhanceMult;
 
     if (this.timer <= 0) {
       const validEnemies = [];
@@ -162,8 +168,9 @@ export class MainSwordWeapon {
 
         // Hiệu ứng Cấp 7: Quẹt kiếm vòng tròn xung quanh người chơi
         if (this.hasSlashAura) {
-          const slashRadius = 140;
-          const baseSlashDmg = this.damage * dmgMult * 3.5;
+          const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+          const slashRadius = 140 * areaMult;
+          const baseSlashDmg = this.damage * effectiveDmgMult * 3.5;
 
           // Tạo vòng chém hào quang
           particles.createHitSparks(player.x, player.y, 16);
@@ -184,6 +191,7 @@ export class MainSwordWeapon {
               if (hit > 0) {
                 particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 20 : (rolled.isCrit ? 12 : 6));
                 particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+                if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
               }
 
               // Đẩy lùi 20%
@@ -193,7 +201,8 @@ export class MainSwordWeapon {
               // DOT Xuất huyết (Bleed) - Kiểm tra tỉ lệ với Né tránh
               const canBleed = e.canApplyEffect ? e.canApplyEffect(1.0, player.accuracy) : true;
               if (canBleed) {
-                e.bleedTimer = 5.0;
+                const dotDurMult = 1.0 + (player.bookStats ? (player.bookStats.dotDurationMult || 0) : 0);
+                e.bleedTimer = 5.0 * dotDurMult;
                 e.bleedStacks = Math.min(10, (e.bleedStacks || 0) + 1);
               }
 
@@ -215,7 +224,7 @@ export class MainSwordWeapon {
             player.y,
             target.x + spread,
             target.y + spread,
-            this.damage * dmgMult,
+            this.damage * effectiveDmgMult,
             this.pierce,
             player
           );
@@ -233,11 +242,12 @@ export class MainSwordWeapon {
     // Nếu có aura cấp 7, vẽ vòng xoáy kiếm nhẹ quanh người
     if (this.hasSlashAura && !player.isDead) {
       const p = camera.worldToScreen(player.x, player.y);
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 120, 180, 0.25)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 140, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 140 * areaMult, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -307,16 +317,20 @@ export class OrbitingBladesWeapon {
     }
 
     // Kiểm tra va chạm giữa từng lưỡi kiếm xoay và quái vật
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curBladeSize = this.bladeSize * areaMult;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
+
     for (let i = 0; i < this.count; i++) {
       const bladeAngle = this.angle + (i * Math.PI * 2) / this.count;
-      const bladeX = player.x + Math.cos(bladeAngle) * this.radius;
-      const bladeY = player.y + Math.sin(bladeAngle) * this.radius;
+      const bladeX = player.x + Math.cos(bladeAngle) * curOrbitRadius;
+      const bladeY = player.y + Math.sin(bladeAngle) * curOrbitRadius;
 
       for (const enemy of enemies) {
         if (enemy.isDead || this.hitCooldowns.has(enemy)) continue;
 
         const dist = Math.hypot(bladeX - enemy.x, bladeY - enemy.y);
-        if (dist <= this.bladeSize + enemy.getHitboxRadius()) {
+        if (dist <= curBladeSize + enemy.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
           const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
           const hit = enemy.takeDamage(rolled.damage, {
@@ -330,6 +344,7 @@ export class OrbitingBladesWeapon {
           if (hit > 0) {
             particles.createHitSparks(bladeX, bladeY, rolled.critTier >= 2 ? 18 : (rolled.isCrit ? 10 : 6));
             particles.createDamageNumber(enemy.x, enemy.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+            if (player.onHitEnemy) player.onHitEnemy(enemy, hit, particles);
           }
 
           this.hitCooldowns.set(enemy, 0.35); // 0.35s sau mới trúng tiếp
@@ -348,20 +363,23 @@ export class OrbitingBladesWeapon {
     if (player.isDead) return;
 
     const bladeImg = getWeaponSprite('assets/weapons/sword_serrated_single.png');
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curBladeSize = this.bladeSize * areaMult;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
 
     ctx.save();
     for (let i = 0; i < this.count; i++) {
       const bladeAngle = this.angle + (i * Math.PI * 2) / this.count;
-      const worldX = player.x + Math.cos(bladeAngle) * this.radius;
-      const worldY = player.y + Math.sin(bladeAngle) * this.radius;
+      const worldX = player.x + Math.cos(bladeAngle) * curOrbitRadius;
+      const worldY = player.y + Math.sin(bladeAngle) * curOrbitRadius;
       const screenPos = camera.worldToScreen(worldX, worldY);
 
       ctx.save();
       ctx.translate(screenPos.x, screenPos.y);
       ctx.rotate(bladeAngle + Math.PI / 2);
 
-      const drawW = this.bladeSize * 0.9;
-      const drawH = this.bladeSize * 2.2;
+      const drawW = curBladeSize * 0.9;
+      const drawH = curBladeSize * 2.2;
 
       if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
         ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -441,12 +459,16 @@ export class HolyAuraWeapon {
       this.auraAnimFrame = (this.auraAnimFrame + 1) % this.AURA_TOTAL_FRAMES;
     }
 
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const effectiveRadius = this.radius * areaMult;
+    const effectiveOuterRadius = this.outerRadius > 0 ? this.outerRadius * areaMult : effectiveRadius;
+
     // Áp dụng làm chậm quái
     if (this.slowEffect > 0) {
       for (const e of enemies) {
         if (e.isDead) continue;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (dist <= this.radius + e.getHitboxRadius()) {
+        if (dist <= effectiveRadius + e.getHitboxRadius()) {
           e.slowTimer = 0.2;
           e.speedMultiplier = 1.0 - this.slowEffect;
         }
@@ -455,12 +477,11 @@ export class HolyAuraWeapon {
 
     if (this.tickTimer <= 0) {
       this.tickTimer = this.tickInterval;
-      const totalR = this.outerRadius > 0 ? this.outerRadius : this.radius;
 
       for (const e of enemies) {
         if (e.isDead) continue;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (dist <= totalR + e.getHitboxRadius()) {
+        if (dist <= effectiveOuterRadius + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
           const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
           const hit = e.takeDamage(rolled.damage, {
@@ -474,6 +495,7 @@ export class HolyAuraWeapon {
           if (hit > 0) {
             particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
             particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+            if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
           }
 
           if (this.doubleStrike && !e.isDead) {
@@ -488,6 +510,7 @@ export class HolyAuraWeapon {
             if (hit2 > 0) {
               particles.createHitSparks(e.x, e.y - 12, rolled2.critTier >= 2 ? 16 : (rolled2.isCrit ? 8 : 4));
               particles.createDamageNumber(e.x, e.y - 12, hit2, rolled2.isCrit, rolled2.isTrueDamage, false, false, null, rolled2.critTier);
+              if (player.onHitEnemy) player.onHitEnemy(e, hit2, particles);
             }
           }
 
@@ -505,24 +528,27 @@ export class HolyAuraWeapon {
     if (player.isDead) return;
 
     const p = camera.worldToScreen(player.x, player.y);
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const effectiveRadius = this.radius * areaMult;
+    const effectiveOuterRadius = this.outerRadius > 0 ? this.outerRadius * areaMult : effectiveRadius;
     ctx.save();
 
     // Vẽ animated aura frame (64x64) scale lên theo bán kính
     const auraImg = auraFrames[this.auraAnimFrame];
-    const auraDrawSize = this.radius * 2.1; // vẽ hơi to hơn bán kính 1 chút
+    const auraDrawSize = effectiveRadius * 2.1; // vẽ hơi to hơn bán kính 1 chút
     if (auraImg && auraImg.complete && auraImg.naturalWidth > 0) {
       ctx.globalAlpha = 0.65;
       ctx.drawImage(auraImg, p.x - auraDrawSize / 2, p.y - auraDrawSize / 2, auraDrawSize, auraDrawSize);
       ctx.globalAlpha = 1;
     } else {
       // Fallback gradient khi chưa tải xong
-      const grad = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, this.radius);
+      const grad = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, effectiveRadius);
       grad.addColorStop(0, 'rgba(255, 230, 100, 0.05)');
       grad.addColorStop(0.7, 'rgba(255, 200, 50, 0.12)');
       grad.addColorStop(1, 'rgba(255, 180, 0, 0.35)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, this.radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, effectiveRadius, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -530,7 +556,7 @@ export class HolyAuraWeapon {
     ctx.strokeStyle = 'rgba(255, 220, 80, 0.4)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, this.radius, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, effectiveRadius, 0, Math.PI * 2);
     ctx.stroke();
 
     // Vùng mở rộng cấp 5 (nếu có)
@@ -538,7 +564,7 @@ export class HolyAuraWeapon {
       ctx.strokeStyle = 'rgba(255, 240, 160, 0.25)';
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, this.outerRadius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, effectiveOuterRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -603,13 +629,14 @@ export class PoolZoneWeapon {
       this.timer = this.cooldown;
 
       // Ném ra các zone gần quái
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
       for (let i = 0; i < this.poolCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = Math.random() * 220 + 80;
         this.activePools.push({
           x: player.x + Math.cos(angle) * dist,
           y: player.y + Math.sin(angle) * dist,
-          radius: this.radius,
+          radius: this.radius * areaMult,
           damage: this.damage * dmgMult,
           duration: this.duration,
           tickTimer: 0.35,
@@ -643,13 +670,16 @@ export class PoolZoneWeapon {
             if (hit > 0) {
               particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
               particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+              if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
             }
 
             if (this.hasDot) {
               const canBurn = e.canApplyEffect ? e.canApplyEffect(1.0, player.accuracy) : true;
               if (canBurn) {
-                e.zoneDotTimer = 5.0;
-                e.zoneDotDmg = rawPoolDmg * 0.20;
+                const dotDurMult = 1.0 + (player.bookStats ? (player.bookStats.dotDurationMult || 0) : 0);
+                const dotDmgMult = 1.0 + (player.bookStats ? (player.bookStats.dotDmgMult || 0) : 0);
+                e.zoneDotTimer = 5.0 * dotDurMult;
+                e.zoneDotDmg = rawPoolDmg * 0.20 * dotDmgMult;
               }
             }
 
@@ -753,10 +783,12 @@ export class PiercingNeedleWeapon {
           999, // Xuyên cực nhiều
           player
         );
+        const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
         proj.speed = 640;
         proj.customSprite = getWeaponSprite('assets/weapons/sword_plain_single.png');
-        proj.width = 46 * this.sizeScale;
-        proj.height = 18 * this.sizeScale;
+        proj.width = Math.round(46 * this.sizeScale * areaMult);
+        proj.height = Math.round(18 * this.sizeScale * areaMult);
+        proj.radius = Math.round(14 * this.sizeScale * areaMult);
         proj.armorPenFlat = this.armorPenFlat || 50; // Xuyên giáp phẳng
         spawnProjCb(proj);
       }
@@ -861,10 +893,13 @@ export class BoomerangWeapon {
       }
 
       // Va chạm quái
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+      const curSize = this.size * areaMult;
+
       for (const e of enemies) {
         if (e.isDead) continue;
         const dist = Math.hypot(b.x - e.x, b.y - e.y);
-        if (dist <= this.size + e.getHitboxRadius()) {
+        if (dist <= curSize + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
           const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
           const hit = e.takeDamage(rolled.damage, {
@@ -878,6 +913,7 @@ export class BoomerangWeapon {
           if (hit > 0) {
             particles.createHitSparks(b.x, b.y, rolled.critTier >= 2 ? 16 : (rolled.isCrit ? 8 : 4));
             particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+            if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
           }
 
           if (e.isDead && onEnemyKill) {
@@ -890,8 +926,11 @@ export class BoomerangWeapon {
     }
   }
 
-  render(ctx, camera) {
+  render(ctx, camera, player = null) {
     const axeImg = getWeaponSprite('assets/weapons/axe_fire_single.png');
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curSize = this.size * areaMult;
+
     ctx.save();
     for (const b of this.activeBoomerangs) {
       const p = camera.worldToScreen(b.x, b.y);
@@ -899,8 +938,8 @@ export class BoomerangWeapon {
       ctx.translate(p.x, p.y);
       ctx.rotate(b.rot);
 
-      const drawW = this.size * 1.4;
-      const drawH = this.size * 2.8;
+      const drawW = curSize * 1.4;
+      const drawH = curSize * 2.8;
 
       if (axeImg && axeImg.complete && axeImg.naturalWidth > 0) {
         ctx.drawImage(axeImg, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -970,13 +1009,15 @@ export class ArcSlashWeapon {
       this.timer = this.cooldown;
       this.slashAnimTimer = 0.22;
       this.slashFacing = player.facing;
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+      const curRadius = this.radius * areaMult;
 
       const performSlash = (offsetAngle = 0) => {
         const facingAngle = this.slashFacing === 'right' ? 0 : Math.PI;
         for (const e of enemies) {
           if (e.isDead) continue;
           const dist = Math.hypot(e.x - player.x, e.y - player.y);
-          if (dist <= this.radius + e.getHitboxRadius()) {
+          if (dist <= curRadius + e.getHitboxRadius()) {
             const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
             let diff = Math.abs(angleToEnemy - (facingAngle + offsetAngle));
             while (diff > Math.PI) diff = Math.PI * 2 - diff;
@@ -995,6 +1036,7 @@ export class ArcSlashWeapon {
               if (hit > 0) {
                 particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 20 : (rolled.isCrit ? 10 : 6));
                 particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+                if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
               }
 
               if (this.knockback > 0) {
@@ -1024,13 +1066,15 @@ export class ArcSlashWeapon {
       const angle = this.slashFacing === 'right' ? 0 : Math.PI;
       const frameIdx = Math.min(Math.max(0, this.slashAnimFrame), this.SLASH_TOTAL_FRAMES - 1);
       const slashImg = slashFrames[frameIdx];
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+      const curRadius = this.radius * areaMult;
 
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(angle);
 
       // Vẽ sprite 32x16 cho hiệu ứng chém, scale theo bán kính vũ khí
-      const drawScale = (this.radius / 110) * 4.5; // Tỷ lệ cơ bản 4.5x
+      const drawScale = (curRadius / 110) * 4.5; // Tỷ lệ cơ bản 4.5x
       const drawW = 32 * drawScale;
       const drawH = 16 * drawScale;
 
@@ -1042,7 +1086,7 @@ export class ArcSlashWeapon {
         ctx.strokeStyle = '#ffd166';
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(0, 0, this.radius, -Math.PI * 0.4, Math.PI * 0.4);
+        ctx.arc(0, 0, curRadius, -Math.PI * 0.4, Math.PI * 0.4);
         ctx.stroke();
       }
 
@@ -1052,7 +1096,7 @@ export class ArcSlashWeapon {
       ctx.strokeStyle = '#ffd166';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(0, 0, this.radius, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.arc(0, 0, curRadius, -Math.PI * 0.4, Math.PI * 0.4);
       ctx.stroke();
 
       ctx.restore();
@@ -1088,6 +1132,10 @@ export class EvolvedStormSwordWeapon {
     this.timer -= delta;
     this.angle += delta * 6.5;
 
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
+    const bladeHitbox = 35 * areaMult;
+
     // Quét kiếm xoay xung quanh
     for (const [enemy, timer] of this.hitCooldowns.entries()) {
       if (timer - delta <= 0) this.hitCooldowns.delete(enemy);
@@ -1096,13 +1144,13 @@ export class EvolvedStormSwordWeapon {
 
     for (let i = 0; i < this.bladeCount; i++) {
       const a = this.angle + (i * Math.PI * 2) / this.bladeCount;
-      const bx = player.x + Math.cos(a) * this.radius;
-      const by = player.y + Math.sin(a) * this.radius;
+      const bx = player.x + Math.cos(a) * curOrbitRadius;
+      const by = player.y + Math.sin(a) * curOrbitRadius;
 
       for (const e of enemies) {
         if (e.isDead || this.hitCooldowns.has(e)) continue;
         const d = Math.hypot(bx - e.x, by - e.y);
-        if (d <= 35 + e.getHitboxRadius()) {
+        if (d <= bladeHitbox + e.getHitboxRadius()) {
           const rawDmg = this.damage * dmgMult;
           const rolled = player.rollDamage ? player.rollDamage(rawDmg, true) : { damage: rawDmg, isCrit: false, isTrueDamage: true };
           const hit = e.takeDamage(rolled.damage, {
@@ -1114,6 +1162,7 @@ export class EvolvedStormSwordWeapon {
           if (hit > 0) {
             particles.createHitSparks(bx, by, rolled.critTier >= 2 ? 24 : (rolled.isCrit ? 14 : 8));
             particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, true, false, false, null, rolled.critTier); // True Damage
+            if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
           }
           this.hitCooldowns.set(e, 0.25);
           if (e.isDead && onEnemyKill) onEnemyKill(e);
@@ -1136,8 +1185,9 @@ export class EvolvedStormSwordWeapon {
               player
             );
             proj.customSprite = getWeaponSprite('assets/weapons/sword_serrated_single.png');
-            proj.width = 60;
-            proj.height = 24;
+            proj.width = Math.round(60 * areaMult);
+            proj.height = Math.round(24 * areaMult);
+            proj.radius = Math.round(18 * areaMult);
             proj.speed = 680;
             spawnProjCb(proj);
           }
@@ -1149,11 +1199,16 @@ export class EvolvedStormSwordWeapon {
   render(ctx, camera, player) {
     if (player.isDead) return;
     const bladeImg = getWeaponSprite('assets/weapons/sword_serrated_single.png');
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
+    const drawW = 28 * areaMult;
+    const drawH = 70 * areaMult;
+
     ctx.save();
     for (let i = 0; i < this.bladeCount; i++) {
       const a = this.angle + (i * Math.PI * 2) / this.bladeCount;
-      const wx = player.x + Math.cos(a) * this.radius;
-      const wy = player.y + Math.sin(a) * this.radius;
+      const wx = player.x + Math.cos(a) * curOrbitRadius;
+      const wy = player.y + Math.sin(a) * curOrbitRadius;
       const sp = camera.worldToScreen(wx, wy);
 
       ctx.save();
@@ -1161,10 +1216,10 @@ export class EvolvedStormSwordWeapon {
       ctx.rotate(a + Math.PI / 2);
 
       if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
-        ctx.drawImage(bladeImg, -14, -35, 28, 70);
+        ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
       } else {
         ctx.fillStyle = '#ffd700';
-        ctx.fillRect(-12, -30, 24, 60);
+        ctx.fillRect(-drawW / 2, -drawH / 2, drawW, drawH);
       }
       ctx.restore();
     }
@@ -1197,6 +1252,9 @@ export class WeaponManager {
         startW = new MainSwordWeapon();
         break;
     }
+    // Đánh dấu đây là Vũ khí Chính độc nhất (không thể bị dung hợp / tiêu hao)
+    startW.isMainWeapon = true;
+    startW.isUnique = true;
     this.equippedWeapons.push(startW);
   }
 
@@ -1233,7 +1291,12 @@ export class WeaponManager {
 
 export function createWeaponById(id) {
   switch (id) {
-    case 'main_sword': return new MainSwordWeapon();
+    case 'main_sword': {
+      const w = new MainSwordWeapon();
+      w.isMainWeapon = true;
+      w.isUnique = true;
+      return w;
+    }
     case 'orbiting_blades': return new OrbitingBladesWeapon();
     case 'holy_aura': return new HolyAuraWeapon();
     case 'pool_zone': return new PoolZoneWeapon();

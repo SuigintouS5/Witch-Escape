@@ -18,9 +18,10 @@ export class PlayerProjectile {
     this.hitEnemies = new Set(); // Tránh gây sát thương 2 lần lên cùng 1 quái
 
     this.speed = 520; // Tốc độ bay nhanh và uy lực
-    this.width = 54;
-    this.height = 22;
-    this.radius = 16;
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    this.width = Math.round(54 * areaMult);
+    this.height = Math.round(22 * areaMult);
+    this.radius = Math.round(16 * areaMult);
 
     const dx = targetX - startX;
     const dy = targetY - startY;
@@ -104,6 +105,9 @@ export class PlayerProjectile {
         if (actualDmg > 0) {
           particles.createHitSparks(this.x, this.y, critTier >= 2 ? 22 : (isCrit ? 14 : 8));
           particles.createDamageNumber(enemy.x, enemy.y, actualDmg, isCrit, isTrueDmg, false, false, null, critTier);
+          if (this.player && this.player.onHitEnemy) {
+            this.player.onHitEnemy(enemy, actualDmg, particles);
+          }
         }
 
         // 4. Đẩy lùi nhẹ quái vật về sau (Knockback)
