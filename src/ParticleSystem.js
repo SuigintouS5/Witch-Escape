@@ -150,6 +150,10 @@ export class ParticleSystem {
     const tier = (critTier !== null) ? critTier : (typeof isCrit === 'number' ? isCrit : (isCrit ? 1 : 0));
     const isCritActive = tier > 0;
 
+    if (tier >= 2 && typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
+      window.__gameInstance.achievementSystem.track('super_crit', 1, true);
+    }
+
     let text = `-${Math.round(damage)}`;
     let color = customColor || '#ffb3c6';
     let strokeColor = '#000000';

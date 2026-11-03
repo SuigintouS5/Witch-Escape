@@ -269,11 +269,11 @@ export class OrbitingBladesWeapon {
 
     this.damage = 180;
     this.count = 1;
-    this.radius = 95;
+    this.radius = 108;
     this.speed = 3.2; // Tốc độ góc
     this.angle = 0;
     this.cooldownFactor = 1.0;
-    this.bladeSize = 24;
+    this.bladeSize = 35; // Tăng kích thước gốc (+45%) giúp kiếm to rõ và uy lực
     this.hitCooldowns = new Map();
   }
 
@@ -955,7 +955,7 @@ export class BoomerangWeapon {
 }
 
 // =========================================================================
-// 7. VŨ KHÍ CHÉM BÁN KÍNH TRƯỚC MẶT (CLEAVE / ARC SLASH)
+// 7. VŨ KHÍ CHÉM BÁN KÍNH TRƯỚC MẶT (CLEAVE / ARC SLASH - TRẢM KÍCH BÁN NGUYỆT)
 // =========================================================================
 export class ArcSlashWeapon {
   constructor() {
@@ -974,11 +974,9 @@ export class ArcSlashWeapon {
     this.slowEnemy = 0;
     this.knockback = 0;
     this.isDoubleSlash = false; // Cấp 7
-    this.slashAnimTimer = 0;
-    this.slashAnimFrame = 0;
-    this.slashAnimSpeed = 0.028; // ~28ms mỗi frame
-    this.SLASH_TOTAL_FRAMES = 8;
-    this.slashFacing = 'right';
+
+    // Quản lý các nhát chém đang hiển thị (hỗ trợ ngắm 360 độ & chém kép chữ X)
+    this.activeSlashes = [];
   }
 
   upgrade() {
@@ -987,43 +985,40 @@ export class ArcSlashWeapon {
 
     switch (this.level) {
       case 2: this.radius *= 1.30; break;
-      case 3: this.slowEnemy = 0.20; break;
+      case 3: this.slowEnemy = 0.25; break;
       case 4: this.cooldown *= 0.70; break;
-      case 5: this.knockback = 45; break; // Đẩy lùi 20%
+      case 5: this.knockback = 50; break; // Đẩy lùi
       case 6: this.cooldown *= 0.80; break;
-      case 7: this.isDoubleSlash = true; break; // Chém kép 2 nhát
+      case 7: this.isDoubleSlash = true; break; // Chém kép 2 nhát chữ X
     }
   }
 
   update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
     this.timer -= delta;
-    if (this.slashAnimTimer > 0) {
-      this.slashAnimTimer -= delta;
-      // Tính frame hiện tại của hoạt ảnh chém
-      this.slashAnimFrame = Math.floor(
-        (1.0 - this.slashAnimTimer / 0.22) * this.SLASH_TOTAL_FRAMES
-      );
-    }
 
-    if (this.timer <= 0) {
-      this.timer = this.cooldown;
-      this.slashAnimTimer = 0.22;
-      this.slashFacing = player.facing;
-      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
-      const curRadius = this.radius * areaMult;
+    // Cập nhật các nhát chém đang diễn ra
+    for (let i = this.activeSlashes.length - 1; i >= 0; i--) {
+      const s = this.activeSlashes[i];
+      s.elapsed += delta;
 
-      const performSlash = (offsetAngle = 0) => {
-        const facingAngle = this.slashFacing === 'right' ? 0 : Math.PI;
+      // Xử lý gây sát thương tại thời điểm nhát chém bung ra (elapsed >= 0)
+      if (s.elapsed >= 0 && !s.hasHit) {
+        s.hasHit = true;
+        const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+        const hitRadius = s.radius * areaMult;
+        const halfArc = Math.PI * 0.42; // Quạt ~150 độ
+
         for (const e of enemies) {
-          if (e.isDead) continue;
+          if (e.isDead || s.hitEnemies.has(e)) continue;
           const dist = Math.hypot(e.x - player.x, e.y - player.y);
-          if (dist <= curRadius + e.getHitboxRadius()) {
+          if (dist <= hitRadius + (e.getHitboxRadius ? e.getHitboxRadius() : 18)) {
             const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
-            let diff = Math.abs(angleToEnemy - (facingAngle + offsetAngle));
+            let diff = Math.abs(angleToEnemy - s.angle);
             while (diff > Math.PI) diff = Math.PI * 2 - diff;
 
-            if (diff < Math.PI * 0.45) { // Góc quạt 90 độ
-              const rawDmg = this.damage * dmgMult;
+            if (diff <= halfArc) {
+              s.hitEnemies.add(e);
+              const rawDmg = this.damage * dmgMult * (s.isSecond ? 0.85 : 1.0);
               const rolled = player.rollDamage ? player.rollDamage(rawDmg) : { damage: rawDmg, isCrit: false, isTrueDamage: false };
               const hit = e.takeDamage(rolled.damage, {
                 isTrueDamage: rolled.isTrueDamage,
@@ -1034,70 +1029,169 @@ export class ArcSlashWeapon {
               }, particles);
 
               if (hit > 0) {
-                particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 20 : (rolled.isCrit ? 10 : 6));
-                particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+                if (particles) {
+                  particles.createHitSparks(e.x, e.y, rolled.critTier >= 2 ? 18 : (rolled.isCrit ? 10 : 6));
+                  particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, rolled.isTrueDamage, false, false, null, rolled.critTier);
+                }
                 if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
               }
 
+              // Làm chậm nếu có
+              if (this.slowEnemy > 0 && e.applySlow) {
+                e.applySlow(this.slowEnemy, 1.2);
+              }
+
+              // Đẩy lùi theo hướng vung kiếm
               if (this.knockback > 0) {
-                e.x += (this.slashFacing === 'right' ? 1 : -1) * this.knockback;
+                e.x += Math.cos(s.angle) * this.knockback;
+                e.y += Math.sin(s.angle) * this.knockback;
               }
 
               if (e.isDead && onEnemyKill) {
-                const burstColor = (e.config && e.config.color) || '#a040b0';
-                particles.createDeathBurst(e.x, e.y, burstColor);
+                const burstColor = (e.config && e.config.color) || '#f59e0b';
+                if (particles) particles.createDeathBurst(e.x, e.y, burstColor);
                 onEnemyKill(e);
               }
             }
           }
         }
-      };
+      }
 
-      performSlash();
+      if (s.elapsed >= s.duration) {
+        this.activeSlashes.splice(i, 1);
+      }
+    }
+
+    // Kích hoạt vung kiếm mới
+    if (this.timer <= 0) {
+      this.timer = this.cooldown;
+
+      // Tính góc chém thông minh (360 độ): ưu tiên quái gần nhất trong tầm quét
+      const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+      const curRadius = this.radius * areaMult;
+      let targetAngle = player.facing === 'left' ? Math.PI : 0;
+
+      // Nếu đang di chuyển, mặc định theo hướng di chuyển
+      if (player.vx !== 0 || player.vy !== 0) {
+        targetAngle = Math.atan2(player.vy, player.vx);
+      }
+
+      // Quét kẻ địch gần nhất trong bán kính 260px
+      let nearestDist = 260;
+      let nearestEnemy = null;
+      for (const e of enemies) {
+        if (e.isDead) continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestEnemy = e;
+        }
+      }
+      if (nearestEnemy) {
+        targetAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
+      }
+
+      // Nhát chém 1
+      this.activeSlashes.push({
+        angle: targetAngle,
+        isSecond: false,
+        duration: 0.22,
+        elapsed: 0,
+        radius: curRadius,
+        hitEnemies: new Set(),
+        hasHit: false
+      });
+
+      // Nhát chém 2 (Cấp 7 - chém chéo tạo chữ X)
       if (this.isDoubleSlash) {
-        setTimeout(() => performSlash(0.1), 100);
+        this.activeSlashes.push({
+          angle: targetAngle + 0.35, // Lệch góc một chút tạo đường cắt chéo kép
+          isSecond: true,
+          duration: 0.22,
+          elapsed: -0.08, // Kích hoạt sau 80ms
+          radius: curRadius * 1.08,
+          hitEnemies: new Set(),
+          hasHit: false
+        });
       }
     }
   }
 
   render(ctx, camera, player) {
-    if (this.slashAnimTimer > 0 && !player.isDead) {
-      const p = camera.worldToScreen(player.x, player.y);
-      const angle = this.slashFacing === 'right' ? 0 : Math.PI;
-      const frameIdx = Math.min(Math.max(0, this.slashAnimFrame), this.SLASH_TOTAL_FRAMES - 1);
-      const slashImg = slashFrames[frameIdx];
+    if (this.activeSlashes.length === 0 || player.isDead) return;
+
+    for (const s of this.activeSlashes) {
+      if (s.elapsed < 0) continue; // Đang chờ delay
+
+      const progress = Math.min(1.0, s.elapsed / s.duration);
+      // Hiệu ứng mờ dần theo đường cong sin: nở rộ ở giữa và tan biến ở cuối
+      const alpha = Math.sin(progress * Math.PI);
+      if (alpha <= 0.01) continue;
+
+      // Điểm gốc của nhát chém: đẩy ra trước mặt player 28px theo góc chém để không đè vào người
+      const forwardOffset = 28;
+      const originX = player.x + Math.cos(s.angle) * forwardOffset;
+      const originY = player.y + Math.sin(s.angle) * forwardOffset;
+      const screenP = camera.worldToScreen(originX, originY);
+
       const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
-      const curRadius = this.radius * areaMult;
+      const curRadius = s.radius * areaMult;
+      const arcSpan = Math.PI * 0.72; // Góc hình quạt ~130 độ
+      const startAngle = -arcSpan / 2;
+      const endAngle = arcSpan / 2;
+
+      // Độ dày lưỡi liềm: mỏng dần theo thời gian khi phóng ra xa
+      const rOuter = curRadius * (0.85 + 0.15 * progress);
+      const rInner = curRadius * (0.50 + 0.35 * progress);
 
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(angle);
+      ctx.translate(screenP.x, screenP.y);
+      ctx.rotate(s.angle);
+      ctx.globalAlpha = Math.min(1.0, alpha * 1.15);
 
-      // Vẽ sprite 32x16 cho hiệu ứng chém, scale theo bán kính vũ khí
-      const drawScale = (curRadius / 110) * 4.5; // Tỷ lệ cơ bản 4.5x
-      const drawW = 32 * drawScale;
-      const drawH = 16 * drawScale;
-
-      if (slashImg && slashImg.complete && slashImg.naturalWidth > 0) {
-        // Vẽ animated slash từ asset
-        ctx.drawImage(slashImg, -drawW * 0.2, -drawH / 2, drawW, drawH);
-      } else {
-        // Fallback: vẽ arc line khi asset chưa tải
-        ctx.strokeStyle = '#ffd166';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.arc(0, 0, curRadius, -Math.PI * 0.4, Math.PI * 0.4);
-        ctx.stroke();
-      }
-
-      // Thêm glow nhẹ quanh vũ khí
-      const progress = 1.0 - (this.slashAnimTimer / 0.22);
-      ctx.globalAlpha = Math.max(0, 0.5 - progress * 0.5);
-      ctx.strokeStyle = '#ffd166';
-      ctx.lineWidth = 3;
+      // 1. Vẽ thân kiếm khí hình bán nguyệt (Crescent Moon Energy Body)
       ctx.beginPath();
-      ctx.arc(0, 0, curRadius, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.arc(0, 0, rOuter, startAngle, endAngle, false);
+      ctx.arc(0, 0, rInner, endAngle, startAngle, true);
+      ctx.closePath();
+
+      // Gradient màu sắc rực rỡ
+      const grad = ctx.createRadialGradient(0, 0, rInner, 0, 0, rOuter);
+      if (s.isSecond) {
+        // Nhát thứ 2: Sắc đỏ hồng - tím huyền bí (Crimson / Violet Cross Slash)
+        grad.addColorStop(0, 'rgba(168, 85, 247, 0)');
+        grad.addColorStop(0.5, 'rgba(244, 63, 94, 0.45)');
+        grad.addColorStop(0.85, 'rgba(255, 255, 255, 0.85)');
+        grad.addColorStop(1, 'rgba(251, 113, 133, 0.95)');
+      } else {
+        // Nhát thứ 1: Sắc vàng kim - thiên thanh (Golden Celestial Blade)
+        grad.addColorStop(0, 'rgba(253, 224, 71, 0)');
+        grad.addColorStop(0.5, 'rgba(251, 191, 36, 0.45)');
+        grad.addColorStop(0.85, 'rgba(255, 255, 255, 0.9)');
+        grad.addColorStop(1, 'rgba(254, 240, 138, 0.95)');
+      }
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // 2. Viền lưỡi chém sắc nhọn phát sáng (Razor Sharp Outer Edge)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, rOuter, startAngle, endAngle, false);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.shadowColor = s.isSecond ? '#f43f5e' : '#f59e0b';
+      ctx.shadowBlur = 12;
       ctx.stroke();
+      ctx.restore();
+
+      // 3. Vệt sáng bổ trợ ở cung trong tạo chiều sâu cho luồng khí
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, (rOuter + rInner) * 0.5, startAngle * 0.8, endAngle * 0.8, false);
+      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = s.isSecond ? 'rgba(254, 205, 211, 0.7)' : 'rgba(254, 249, 195, 0.75)';
+      ctx.stroke();
+      ctx.restore();
 
       ctx.restore();
     }
@@ -1122,7 +1216,7 @@ export class EvolvedStormSwordWeapon {
     this.timer = 0.1;
     this.bladeCount = 4;
     this.angle = 0;
-    this.radius = 135;
+    this.radius = 150;
     this.hitCooldowns = new Map();
   }
 
@@ -1134,7 +1228,7 @@ export class EvolvedStormSwordWeapon {
 
     const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
     const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
-    const bladeHitbox = 35 * areaMult;
+    const bladeHitbox = 48 * areaMult;
 
     // Quét kiếm xoay xung quanh
     for (const [enemy, timer] of this.hitCooldowns.entries()) {
@@ -1201,8 +1295,8 @@ export class EvolvedStormSwordWeapon {
     const bladeImg = getWeaponSprite('assets/weapons/sword_serrated_single.png');
     const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
     const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
-    const drawW = 28 * areaMult;
-    const drawH = 70 * areaMult;
+    const drawW = 38 * areaMult;
+    const drawH = 95 * areaMult;
 
     ctx.save();
     for (let i = 0; i < this.bladeCount; i++) {

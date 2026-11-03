@@ -125,9 +125,9 @@ export const BOOK_DEFINITIONS = {
     work: 'Discours de la méthode',
     tier: 'evolved',
     year: '1637',
-    desc: 'Tăng +30% Điểm kinh nghiệm (EXP) nhận được.',
-    buffs: { expMult: 0.30 },
-    branchTargets: ['heidegger', 'kant'],
+    desc: 'Tăng +20% Điểm kinh nghiệm (EXP) và +10% Sát thương toàn vũ khí.',
+    buffs: { expMult: 0.20, dmgMult: 0.10 },
+    branchTargets: ['heidegger', 'kant', 'spinoza'],
     reqKillCount: 75,
     evolutionDesc: 'Tiêu diệt 75 quái vật để mở nhánh tiến cấp'
   },
@@ -261,8 +261,8 @@ export const BOOK_DEFINITIONS = {
     work: 'Surveiller et punir: Naissance de la prison',
     tier: 'evolved',
     year: '1975',
-    desc: 'Giảm 20% Thời gian hồi chiêu tất cả vũ khí.',
-    buffs: { cooldownReduction: 0.20 }
+    desc: 'Giảm 20% Thời gian hồi chiêu và tăng +20% Độ chính xác tất cả vũ khí.',
+    buffs: { cooldownReduction: 0.20, accuracy: 0.20 }
   },
 
   // =========================================================================
@@ -288,7 +288,8 @@ export const BOOK_DEFINITIONS = {
     work: 'The Wealth of Nations',
     tier: 'special',
     year: '1776',
-    desc: 'Khai thông kinh tế: Nhân x1.2 toàn bộ số Tiền Vàng kiếm được sau trận.',
+    desc: 'Khai thông kinh tế: Tăng +40% Tiền Vàng và x1.2 toàn bộ Vàng nhận được sau trận.',
+    buffs: { goldMult: 0.40, goldMultiplierFinal: 1.20 },
     buffs: { goldMultiplierFinal: 1.20 }
   },
   dante: {
@@ -418,25 +419,16 @@ export const BOOK_DEFINITIONS = {
     work: 'Écrits',
     tier: 'special',
     year: '1966',
-    desc: 'Hợp thể [Hegel + Saussure + Freud]: 50% Sát thương chuẩn, -20% Cooldown, +50% Dmg, +50% HP, +5% Giảm sát thương, +50% Crit Chance, +100% Crit Dmg, +30% Chính xác, +5% Né, +10% Phản đòn, +10% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, +50% Vàng, +10% Score/quái.',
+    desc: 'Giai Đoạn Tấm Gương (Mirror Stage): +30% Dmg, +25% HP, +25% Crit, -15% Hồi chiêu, 30% Sát thương chuẩn, +1 Mạng hồi sinh, +5% Hút máu. Triệu hồi Bản Sao Bóng Ma Hộ Vệ (Echo Stand) bảo vệ sau lưng gây 50% Sát thương!',
     buffs: {
-      trueDmgRatio: 0.50,
-      cooldownReduction: 0.20,
-      dmgMult: 0.50,
-      healthMult: 0.50,
-      damageReduction: 0.05,
-      critChance: 0.50,
-      critDamage: 1.00,
-      accuracy: 0.30,
-      dodge: 0.05,
-      reflectPercent: 0.10,
-      lifesteal: 0.10,
-      areaMult: 0.50,
-      speedMult: 0.20,
+      dmgMult: 0.30,
+      healthMult: 0.25,
+      critChance: 0.25,
+      cooldownReduction: 0.15,
+      trueDmgRatio: 0.30,
       extraLife: 1,
-      expMult: 0.50,
-      goldMult: 0.50,
-      scorePerKillMult: 0.10
+      lifesteal: 0.05,
+      hasLacanPhantomStand: true
     },
     fusionIngredients: ['hegel', 'saussure', 'freud']
   },
@@ -446,26 +438,16 @@ export const BOOK_DEFINITIONS = {
     work: 'De la grammatologie',
     tier: 'special',
     year: '1967',
-    desc: 'Hợp thể [Heidegger + Saussure + Hegel]: 60% Sát thương chuẩn, -30% Cooldown, +60% Dmg, +60% HP, +60% Giáp, +10% Giảm sát thương, +60% Crit Chance, +120% Crit Dmg, +30% Chính xác, +5% Né, +10% Phản đòn, +10% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, +50% Vàng, +15% Score/quái.',
+    desc: 'Giải Cấu Trúc (Deconstruction): +35% Dmg, +30% Giáp, +30% Crit, -20% Hồi chiêu, 40% Sát thương chuẩn, +1 Mạng hồi sinh, +5% Hút máu. Mọi đòn đánh xóa bỏ vĩnh viễn 40% Giáp của quái; quái chết phát nổ ký tự gây sát thương diện rộng.',
     buffs: {
-      trueDmgRatio: 0.60,
-      cooldownReduction: 0.30,
-      dmgMult: 0.60,
-      healthMult: 0.60,
-      armorMult: 0.60,
-      damageReduction: 0.10,
-      critChance: 0.60,
-      critDamage: 1.20,
-      accuracy: 0.30,
-      dodge: 0.05,
-      reflectPercent: 0.10,
-      lifesteal: 0.10,
-      areaMult: 0.50,
-      speedMult: 0.20,
+      dmgMult: 0.35,
+      armorMult: 0.30,
+      critChance: 0.30,
+      cooldownReduction: 0.20,
+      trueDmgRatio: 0.40,
       extraLife: 1,
-      expMult: 0.50,
-      goldMult: 0.50,
-      scorePerKillMult: 0.15
+      lifesteal: 0.05,
+      derridaDeconstruction: true
     },
     fusionIngredients: ['heidegger', 'saussure', 'hegel']
   },
@@ -475,28 +457,172 @@ export const BOOK_DEFINITIONS = {
     work: 'Manifest der Kommunistischen Partei',
     tier: 'special',
     year: '1848',
-    desc: 'Đỉnh cao tối thượng [Hegel + Feuerbach + Adam Smith]: 80% Sát thương chuẩn, -50% Cooldown, +75% Dmg, +75% HP, +75% Giáp, +15% Giảm sát thương, +75% Crit Chance, +150% Crit Dmg, +40% Chính xác, +5% Né, +10% Phản đòn, +15% Hút máu, +50% Size, +20% Tốc chạy, THÊM 1 MẠNG HỒI SINH, +50% EXP, x1.4 Tiền Vàng, +20% Score/quái.',
+    desc: 'Giải Phóng Vô Sản (Proletariat Revolution): +40% Dmg, +35% HP, +35% Giáp, -25% Hồi chiêu, 50% Sát thương chuẩn, +1 Mạng hồi sinh, +5% Hút máu, +40% Vàng. Quái chết phát nổ Sóng Xung Kích Đỏ; mỗi 100 Vàng kiếm được tăng vĩnh viễn +1% Sát thương.',
     buffs: {
-      trueDmgRatio: 0.80,
-      cooldownReduction: 0.50,
-      dmgMult: 0.75,
-      healthMult: 0.75,
-      armorMult: 0.75,
-      damageReduction: 0.15,
-      critChance: 0.75,
-      critDamage: 1.50,
-      accuracy: 0.40,
-      dodge: 0.05,
-      reflectPercent: 0.10,
-      lifesteal: 0.15,
-      areaMult: 0.50,
-      speedMult: 0.20,
+      dmgMult: 0.40,
+      healthMult: 0.35,
+      armorMult: 0.35,
+      cooldownReduction: 0.25,
+      trueDmgRatio: 0.50,
       extraLife: 1,
-      expMult: 0.50,
-      goldMultiplierFinal: 1.40,
-      scorePerKillMult: 0.20
+      lifesteal: 0.05,
+      goldMult: 0.40,
+      marxRevolution: true
     },
     fusionIngredients: ['hegel', 'feuerbach', 'adam_smith']
+  },
+  // --- CÁC SÁCH BẬC KHỞI ĐẦU MỚI (STARTERS 9-11) ---
+  le_fanu: {
+    id: 'le_fanu',
+    author: 'Joseph Sheridan Le Fanu',
+    work: 'Carmilla',
+    tier: 'starter',
+    year: '1872',
+    desc: 'Tăng +3% Hút máu, +5% Tốc độ di chuyển và +5% Máu tối đa.',
+    buffs: { lifesteal: 0.03, speedMult: 0.05, healthMult: 0.05 },
+    evolutionTarget: 'bram_stoker'
+  },
+  augustine: {
+    id: 'augustine',
+    author: 'Augustine of Hippo',
+    work: 'Confessiones',
+    tier: 'starter',
+    year: '397',
+    desc: 'Tăng +10% Điểm Kinh Nghiệm (EXP) và +10% Tiền Vàng nhận được.',
+    buffs: { expMult: 0.10, goldMult: 0.10 },
+    evolutionTarget: 'thomas_aquinas'
+  },
+  horkheimer: {
+    id: 'horkheimer',
+    author: 'Max Horkheimer',
+    work: 'Zur Kritik der instrumentellen Vernunft', // Eclipse of Reason
+    tier: 'starter',
+    year: '1947',
+    desc: 'Đòn đánh gắn Suy Yếu 1 lên quái (Quái giảm 5% sát thương và chịu thêm +5% sát thương trong 3s).',
+    buffs: { applyWeakness1: true },
+    evolutionTarget: 'habermas'
+  },
+
+  // --- CÁC SÁCH TIẾN HÓA MỚI (EVOLVED) ---
+  spinoza: {
+    id: 'spinoza',
+    author: 'Baruch Spinoza',
+    work: 'Ethica, ordine geometrico demonstrata',
+    tier: 'evolved',
+    year: '1677',
+    desc: 'Nhất Thể Bản Thể (Substantia): +30 Giáp, +35% Máu, -15% Hồi chiêu. Mỗi 10 Giáp tăng +8% Sát thương; mỗi 100 Máu tăng +2% Sát thương & +1% Tốc độ. Giáp chặn đòn phát nổ Sóng Hình Học phản 150% sát thương chặn!',
+    buffs: { armorFlat: 30, healthMult: 0.35, cooldownReduction: 0.15, spinozaSubstantia: true }
+  },
+  bram_stoker: {
+    id: 'bram_stoker',
+    author: 'Bram Stoker',
+    work: 'Dracula',
+    tier: 'evolved',
+    year: '1897',
+    desc: 'Tăng +7% Hút máu, +20% Sát thương, +10% Sát thương chuẩn, +10% Giảm sát thương. Cơn Khát Máu: Không đánh trúng quái trong 4s sẽ mất 2% HP/s (dừng ở 25% máu).',
+    buffs: { lifesteal: 0.07, dmgMult: 0.20, trueDmgRatio: 0.10, damageReduction: 0.10, bloodthirst: true }
+  },
+  thomas_aquinas: {
+    id: 'thomas_aquinas',
+    author: 'Thomas Aquinas',
+    work: 'Summa Theologiae',
+    tier: 'evolved',
+    year: '1485',
+    desc: 'Mỗi giây không nhận sát thương tăng +2% Tiền Vàng (Cộng dồn). Nhận sát thương sẽ bị chia nửa số stack tích lũy.',
+    buffs: { passiveGreedPerSec: 0.02 }
+  },
+  habermas: {
+    id: 'habermas',
+    author: 'Jürgen Habermas',
+    work: 'Theorie des kommunikativen Handelns',
+    tier: 'evolved',
+    year: '1981',
+    desc: 'Tấn công gây Suy Yếu 1. Khi đủ 20 quái bị dính Suy Yếu 1, phát ra làn sóng xung kích đẩy lùi 20% quái vật.',
+    buffs: { applyWeakness1: true, habermasPulse: true },
+    evolutionTarget: 'honneth'
+  },
+  honneth: {
+    id: 'honneth',
+    author: 'Axel Honneth',
+    work: 'Kampf um Anerkennung',
+    tier: 'evolved',
+    year: '1992',
+    desc: 'Tăng +20% Sát thương. Tấn công gây Suy Yếu 2 (giảm 10% dmg quái, chịu thêm +10% dmg trong 5s). Đánh quái bị Suy Yếu sẽ gây Thiêu Đốt (Burn).',
+    buffs: { dmgMult: 0.20, applyWeakness2: true, burnWeakened: true }
+  },
+
+  // --- CÁC SÁCH ĐẶC BIỆT & HỢP THỂ MỚI (SPECIAL & FUSION) ---
+  tolstoy: {
+    id: 'tolstoy',
+    author: 'Lev Tolstoy',
+    work: 'Война и мир', // War and Peace
+    tier: 'special',
+    year: '1869',
+    desc: 'Mở khóa đặc biệt [Làm chậm 100 quái]: Mọi đòn đánh của vũ khí có 20% tỷ lệ làm chậm quái 20% trong 5 giây.',
+    buffs: { slowChance: 0.20, slowAmount: 0.20, slowDuration: 5.0 }
+  },
+  kierkegaard: {
+    id: 'kierkegaard',
+    author: 'Søren Kierkegaard',
+    work: 'Frygt og Bæven',
+    tier: 'special',
+    year: '1843',
+    desc: 'Mở khóa đặc biệt [Bỏ sách Hegel]: Cú nhảy niềm tin tăng +35% Tỷ lệ chí mạng, +30% Sát thương chí mạng và 15% Sát thương chuẩn.',
+    buffs: { critChance: 0.35, critDamage: 0.30, trueDmgRatio: 0.15 }
+  },
+  nguyen_du: {
+    id: 'nguyen_du',
+    author: 'Nguyễn Du',
+    work: 'Đoạn trường tân thanh', // Truyện Kiều
+    tier: 'special',
+    year: '1820',
+    desc: 'Mở khóa đặc biệt [60s HP > 50% & 60s HP < 50%]: Đòn đánh đầu tiên gán Suy Yếu 2 lên quái (quái giảm 15% dmg và nhận thêm +15% sát thương trong 5s). Nếu có nguồn Suy Yếu 2 khác, chuyển hóa thành Xuất Huyết (Bleed) liên tục!',
+    buffs: { firstHitWeakness2: true }
+  },
+  butler: {
+    id: 'butler',
+    author: 'Judith Butler',
+    work: 'Gender Trouble',
+    tier: 'special',
+    year: '1990',
+    desc: 'Thức tỉnh tối thượng [Lacan + Foucault]: +25% Cooldown, +30% Tốc chạy, +25% Né, +35% Size. Cơ chế [Performativity Flux] luân chuyển mỗi 10s: 5s [Hóa Giải] (100% dmg nhận biến thành Giáp ảo + phản chấn 30%), 5s [Bộc Phát] (+60% Sát thương chuẩn + x2 tốc độ đánh vũ khí). Tăng thêm +20% toàn bộ hiệu lực của Lacan!',
+    buffs: {
+      cooldownReduction: 0.25,
+      speedMult: 0.30,
+      dodge: 0.25,
+      areaMult: 0.35,
+      trueDmgRatio: 0.30
+    }
+  },
+  beauvoir: {
+    id: 'beauvoir',
+    author: 'Simone de Beauvoir',
+    work: "Pour une morale de l'ambiguïté", // The Ethics of Ambiguity
+    tier: 'special',
+    year: '1947',
+    desc: 'Hợp thể Hiện Sinh [Hegel + Sartre]: +40% EXP, +30% Vàng, +25% Cooldown, +30% Sát thương, +15% Giảm sát thương. Cơ chế [Ambiguous Liberation]: Hào quang Tự Do làm giảm 25% Sát thương & 25% Tốc độ của quái trong 300px; cứ 2 quái trên màn hình tăng +1% Sát thương (tối đa +80%). Tiêu diệt Mini Boss/Elite nhận 4s Bất Tử và hồi 20% Máu tối đa!',
+    buffs: {
+      expMult: 0.40,
+      goldMult: 0.30,
+      cooldownReduction: 0.25,
+      dmgMult: 0.30,
+      damageReduction: 0.15
+    },
+    fusionIngredients: ['hegel', 'sartre']
+  },
+  marquez: {
+    id: 'marquez',
+    author: 'Gabriel García Márquez',
+    work: 'Cien años de soledad',
+    tier: 'special',
+    year: '1967',
+    desc: 'Hiện Thực Huyền Ảo tối thượng [Kafka + 2 lần HP < 20%]: +40% Sát thương, +40% HP, +20% Hút máu, +50% Size. Cơ chế [Vòng Lặp Trăm Năm]: Khi nhận sát thương chí tử, không chết mà đóng băng quái 3s dưới Mưa Hoa Vàng Macondo, hồi sinh 100% HP & dọn quái thường (Hồi chiêu 240s). Nội tại [Lời Nguyền Macondo]: Mỗi 1% HP bị mất tăng +1.5% Crit Chance & +2% Crit Damage!',
+    buffs: {
+      dmgMult: 0.40,
+      healthMult: 0.40,
+      lifesteal: 0.20,
+      areaMult: 0.50
+    }
   }
 };
 
@@ -508,7 +634,10 @@ export const STARTER_BOOK_IDS = [
   'john_milton',
   'peuchet',
   'ovidius',
-  'saussure'
+  'saussure',
+  'le_fanu',
+  'augustine',
+  'horkheimer'
 ];
 
 // Tự động gán bí danh buffDesc tương thích ngược với desc
@@ -559,6 +688,25 @@ export class BookSystem {
     // Victor Hugo Slow Wave Timer (30s)
     this.hugoWaveTimer = 30;
     this.consumedExtraLives = 0;
+
+    // Trạng thái cho Butler (Performativity Flux)
+    this.butlerFluxTimer = 0;
+    this.butlerFluxState = 'absorption'; // 'absorption' | 'burst'
+
+    // Trạng thái cho Beauvoir (Bất tử khi diệt boss)
+    this.beauvoirInvincibleTimer = 0;
+
+    // Trạng thái cho Márquez (Vòng lặp Macondo & HP < 20%)
+    this.marquezCheatDeathCooldown = 0;
+    this.marquezCheatDeathActive = 0;
+    this.kafkaLowHpTriggers = 0;
+    this.isInLowHp = false;
+
+    // Trạng thái cho Tolstoy, Nguyễn Du, Thomas Aquinas
+    this.slowedEnemiesCount = 0;
+    this.highHpTimer = 0;
+    this.lowHpTimer = 0;
+    this.thomasGoldStacks = 0;
 
     // Thư Viện Codex lưu trữ vĩnh viễn (các sách đã từng sở hữu)
     this.unlockedCodex = new Set();
@@ -689,6 +837,14 @@ export class BookSystem {
   // Ghi nhận quái bị tiêu diệt: Quái thường = 1, Mini Boss = 5, Main Boss = 10
   onEnemyKilled(enemy, isMiniBoss = false, isMainBoss = false) {
     const killScore = isMainBoss ? 10 : (isMiniBoss ? 5 : 1);
+
+    // Simone de Beauvoir: Diệt Tinh Anh (Elite) hoặc Boss/Mini-boss kích hoạt 4s Bất Tử và hồi 20% Max HP
+    if (this.hasBook('beauvoir') && (isMiniBoss || isMainBoss || (enemy && enemy.isElite))) {
+      this.beauvoirInvincibleTimer = 4.0;
+      if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.player) {
+        window.__gameInstance.player.heal(Math.round(window.__gameInstance.player.maxHealth * 0.20));
+      }
+    }
 
     // Kiểm tra Dumas: trả thù quái cắn trong 10s
     if (this.hasBook('peuchet') && this.recentAttackers.has(enemy)) {
@@ -833,6 +989,9 @@ export class BookSystem {
 
     // Thêm sách hợp thể tối thượng
     this.addBook(targetId);
+    if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
+      window.__gameInstance.achievementSystem.track('mythic_fusions', 1);
+    }
     this.pendingAwakenings.push({
       targetId: targetId,
       ingredientIds: ingredientIds,
@@ -858,7 +1017,7 @@ export class BookSystem {
     // 2. Adam Smith: Khi % vàng cộng thêm >= 300%
     if (!this.appearedBookIds.has('adam_smith') && player) {
       const totalGoldMult = (player.bonusGreedMult || 1.0) * (player.metaGoldMult || 1.0);
-      if (totalGoldMult >= 4.0 && this.canPickUpMore()) { // +300% tức là 4.0x
+      if (totalGoldMult >= 2.0 && this.canPickUpMore()) { // +300% tức là 4.0x
         this.addBook('adam_smith');
         this.pendingAwakenings.push({
           targetId: 'adam_smith',
@@ -917,6 +1076,71 @@ export class BookSystem {
     if (this.hasBook('hegel') && this.hasBook('feuerbach') && this.hasBook('adam_smith') && !this.hasBook('marx')) {
       this.executeFusion(['hegel', 'feuerbach', 'adam_smith'], 'marx');
     }
+
+    // 13. Judith Butler: Lacan + Foucault (Chỉ mất Foucault, GIỮ LẠI Lacan!)
+    if (this.hasBook('lacan') && this.hasBook('foucault') && !this.hasBook('butler')) {
+      const fIdx = this.activeBooks.findIndex(b => b.id === 'foucault');
+      if (fIdx !== -1) {
+        this.activeBooks.splice(fIdx, 1);
+        delete this.progress['foucault'];
+      }
+      this.addBook('butler');
+      this.pendingAwakenings.push({
+        targetId: 'butler',
+        ingredientIds: ['foucault'],
+        isFusion: true
+      });
+    }
+
+    // 14. Simone de Beauvoir: Hegel + Sartre
+    if (this.hasBook('hegel') && this.hasBook('sartre') && !this.hasBook('beauvoir')) {
+      this.executeFusion(['hegel', 'sartre'], 'beauvoir');
+    }
+
+    // 15. Gabriel García Márquez: Kafka + Kích hoạt máu dưới 20% đủ 2 lần
+    if (this.hasBook('kafka') && !this.hasBook('marquez') && this.kafkaLowHpTriggers >= 2) {
+      const kIdx = this.activeBooks.findIndex(b => b.id === 'kafka');
+      if (kIdx !== -1) {
+        this.activeBooks.splice(kIdx, 1);
+        delete this.progress['kafka'];
+      }
+      this.addBook('marquez');
+      this.pendingAwakenings.push({
+        targetId: 'marquez',
+        ingredientIds: ['kafka'],
+        isFusion: true
+      });
+    }
+
+    // 16. Kierkegaard: Bỏ sách Hegel
+    if (this.discardedBooks.includes('hegel') && !this.hasBook('kierkegaard') && !this.appearedBookIds.has('kierkegaard') && this.canPickUpMore()) {
+      this.addBook('kierkegaard');
+      this.pendingAwakenings.push({
+        targetId: 'kierkegaard',
+        ingredientIds: [],
+        isFusion: false
+      });
+    }
+
+    // 17. Tolstoy: Làm chậm 100 quái
+    if (this.slowedEnemiesCount >= 100 && !this.hasBook('tolstoy') && !this.appearedBookIds.has('tolstoy') && this.canPickUpMore()) {
+      this.addBook('tolstoy');
+      this.pendingAwakenings.push({
+        targetId: 'tolstoy',
+        ingredientIds: [],
+        isFusion: false
+      });
+    }
+
+    // 18. Nguyễn Du: 60s HP > 50% & 60s HP < 50%
+    if (this.highHpTimer >= 60 && this.lowHpTimer >= 60 && !this.hasBook('nguyen_du') && !this.appearedBookIds.has('nguyen_du') && this.canPickUpMore()) {
+      this.addBook('nguyen_du');
+      this.pendingAwakenings.push({
+        targetId: 'nguyen_du',
+        ingredientIds: [],
+        isFusion: false
+      });
+    }
   }
 
   // Cập nhật từng frame trong trận
@@ -942,7 +1166,7 @@ export class BookSystem {
     if (this.hasBook('garci_montalvo') && player) {
       if (player.health < player.maxHealth * 0.20 && !player.isDead) {
         this.lowHealthTimer += delta;
-        if (this.lowHealthTimer >= 120.0) {
+        if (this.lowHealthTimer >= 35.0) {
           this.markReadyToEvolve('garci_montalvo', 'cervantes');
         }
       }
@@ -970,12 +1194,67 @@ export class BookSystem {
       }
     }
 
-    // 5. Theo dõi Foucault: Tích lũy đạt 40% Cooldown Reduction
+    // 5. Theo dõi Foucault (ĐÃ BALANCE): Đạt 40% Cooldown HOẶC 25% Cooldown HOẶC có vũ khí Cấp 5+
     if (this.hasBook('saussure') && player) {
       const curCDR = (player.cooldownReduction || 0) + (this.getBonusStats().cooldownReduction || 0);
-      if (curCDR >= 0.40) {
+      const hasHighTierWeapon = (player.weaponManager && player.weaponManager.equippedWeapons && player.weaponManager.equippedWeapons.some(w => w.level >= 5));
+      if (curCDR >= 0.40 || curCDR >= 0.25 || hasHighTierWeapon) {
         this.markReadyToEvolve('saussure', 'foucault');
       }
+    }
+
+    // 5.1. Theo dõi Butler (Performativity Flux: luân chuyển 5s Hóa Giải / 5s Bộc Phát)
+    if (this.hasBook('butler')) {
+      this.butlerFluxTimer += delta;
+      if (this.butlerFluxTimer >= 10.0) {
+        this.butlerFluxTimer -= 10.0;
+      }
+      this.butlerFluxState = (this.butlerFluxTimer < 5.0) ? 'absorption' : 'burst';
+    }
+
+    // 5.2. Theo dõi Beauvoir (Invincible Timer)
+    if (this.beauvoirInvincibleTimer > 0) {
+      this.beauvoirInvincibleTimer -= delta;
+    }
+
+    // 5.3. Theo dõi Márquez (Cooldown Hồi sinh Macondo & đếm máu < 20%)
+    if (this.marquezCheatDeathCooldown > 0) {
+      this.marquezCheatDeathCooldown -= delta;
+    }
+    if (this.marquezCheatDeathActive > 0) {
+      this.marquezCheatDeathActive -= delta;
+    }
+    if (player && !player.isDead) {
+      const isUnder20 = (player.health < player.maxHealth * 0.20);
+      if (isUnder20 && !this.isInLowHp) {
+        this.isInLowHp = true;
+        if (this.hasBook('kafka')) {
+          this.kafkaLowHpTriggers = (this.kafkaLowHpTriggers || 0) + 1;
+        }
+      } else if (!isUnder20 && this.isInLowHp) {
+        this.isInLowHp = false;
+      }
+
+      // Theo dõi Nguyễn Du (60s HP > 50% & 60s HP < 50%)
+      if (player.health >= player.maxHealth * 0.50) {
+        this.highHpTimer += delta;
+      } else {
+        this.lowHpTimer += delta;
+      }
+    }
+
+    // 5.35. Cơn Khát Máu Bram Stoker (Dracula): Không đánh trúng quái trong 4s mất 2% HP/s (dừng ở 25% máu)
+    if (this.hasBook('bram_stoker') && player && !player.isDead) {
+      this.bramNoHitTimer = (this.bramNoHitTimer || 0) + delta;
+      if (this.bramNoHitTimer >= 4.0 && player.health > player.maxHealth * 0.25) {
+        const drain = player.maxHealth * 0.02 * delta;
+        player.health = Math.max(player.maxHealth * 0.25, player.health - drain);
+      }
+    }
+
+    // 5.4. Theo dõi Thomas Aquinas (Mỗi giây không nhận dmg tăng +2% Vàng)
+    if (this.hasBook('thomas_aquinas') && this.noDamageTimer >= 1.0) {
+      this.thomasGoldStacks = (this.thomasGoldStacks || 0) + 0.02;
     }
 
     // 6. Nội tại Kafka: Tích lũy +1% Crit Chance mỗi giây khi không bị đánh
@@ -1110,8 +1389,62 @@ export class BookSystem {
       stats.lifesteal += 0.05;
     }
 
+    // Cộng hưởng Butler & Lacan (+20% toàn bộ chỉ số của Lacan)
+    if (this.hasBook('butler') && this.hasBook('lacan')) {
+      stats.dmgMult += 0.10;
+      stats.healthMult += 0.10;
+      stats.critChance += 0.10;
+      stats.critDamage += 0.20;
+      stats.cooldownReduction += 0.04;
+    }
+
+    // Spinoza: Nhất Thể Bản Thể (Mỗi 10 Giáp +8% Sát thương, Mỗi 100 HP +2% Sát thương & +1% Tốc độ)
+    if (this.hasBook('spinoza')) {
+      stats.spinozaSubstantia = true;
+      stats.armorFlat = (stats.armorFlat || 0) + 30;
+      const curArmor = (player ? (player.armor || 0) : 0) + (stats.armorFlat || 0);
+      const armorDmgBonus = Math.floor(curArmor / 10) * 0.08;
+      stats.dmgMult += armorDmgBonus;
+
+      const curHp = player ? (player.maxHealth || 1000) : 1000;
+      const hpDmgBonus = Math.floor(curHp / 100) * 0.02;
+      const hpSpeedBonus = Math.floor(curHp / 100) * 0.01;
+      stats.dmgMult += hpDmgBonus;
+      stats.speedMult += hpSpeedBonus;
+    }
+
+    // Karl Marx: Tuyên Ngôn Cách Mạng (Mỗi 100 Vàng kiếm được tăng vĩnh viễn +1% Sát thương)
+    if (this.hasBook('marx')) {
+      stats.marxRevolution = true;
+      const goldEarned = (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.goldEarned) ? window.__gameInstance.goldEarned : 0;
+      stats.dmgMult += Math.floor(goldEarned / 100) * 0.01;
+    }
+
+    // Jacques Lacan: Kích hoạt Bóng Ma Hộ Vệ (Lacan Echo Stand)
+    if (this.hasBook('lacan')) {
+      stats.hasLacanPhantomStand = true;
+    }
+
+    // Jacques Derrida: Kích hoạt Giải Cấu Trúc (Deconstruction)
+    if (this.hasBook('derrida')) {
+      stats.derridaDeconstruction = true;
+    }
+
+    // Butler Phase Bộc Phát (+60% True Damage)
+    if (this.hasBook('butler')) {
+      stats.hasButlerAbsorption = (this.butlerFluxState === 'absorption');
+      if (this.butlerFluxState === 'burst') {
+        stats.trueDmgRatio = Math.max(stats.trueDmgRatio, 0.60);
+      }
+    }
+
+    // Thomas Aquinas passive greed stack
+    if (this.hasBook('thomas_aquinas') && this.thomasGoldStacks > 0) {
+      stats.goldMult += this.thomasGoldStacks;
+    }
+
     // Giới hạn cân bằng trần Cooldown Reduction (Tối đa 75%)
-    stats.cooldownReduction = Math.min(0.75, stats.cooldownReduction);
+    stats.cooldownReduction = Math.min(0.70, stats.cooldownReduction);
 
     // Giới hạn cân bằng trần Giảm Sát Thương % (Tối đa 75%)
     stats.damageReduction = Math.min(0.75, stats.damageReduction);
@@ -1227,6 +1560,9 @@ export class BookSystem {
     if (!this.unlockedCodex.has(bookId)) {
       this.unlockedCodex.add(bookId);
       this.saveCodex();
+      if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
+        window.__gameInstance.achievementSystem.track('unlocked_books', this.unlockedCodex.size, true);
+      }
     }
   }
 

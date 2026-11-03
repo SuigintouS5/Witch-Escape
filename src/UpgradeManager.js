@@ -402,6 +402,9 @@ export class UpgradeManager {
       this.attackSlots.splice(idx2, 1);
 
       this.canEvolve = false;
+      if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
+        window.__gameInstance.achievementSystem.track('evolved_weapons', 1);
+      }
       return true;
     }
     return false;

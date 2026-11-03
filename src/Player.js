@@ -224,6 +224,7 @@ export class Player {
 
   // Áp dụng Debuff
   applyDebuff(type, value, duration) {
+    if (this.bookSystemRef && this.bookSystemRef.hasBook('beauvoir')) return; // Miễn dịch hiệu ứng xấu (Simone de Beauvoir)
     if (type === 'slow') {
       this.slowMult = Math.max(0.2, 1.0 - value);
       this.slowTimer = duration;
@@ -254,6 +255,8 @@ export class Player {
   // Nhận Sát Thương có tính Né Tránh, Giáp, Giảm Sát Thương % và Máu Ảo
   takeDamage(amount, options = {}, particles = null) {
     if (this.isDead || this.invincibilityTimer > 0) return false;
+    // Bất tử khi kích hoạt Beauvoir hoặc Hồi sinh Macondo
+    if (this.bookSystemRef && (this.bookSystemRef.beauvoirInvincibleTimer > 0 || this.bookSystemRef.marquezCheatDeathActive > 0)) return false;
 
     const attackerAcc = options.attackerAccuracy !== undefined ? options.attackerAccuracy : 1.0;
     const isTrueDamage = !!options.isTrueDamage;
@@ -277,8 +280,19 @@ export class Player {
     // 2. Tính Giáp & Hệ số Giảm Sát Thương % (nếu không phải Sát Thương Chuẩn)
     if (!isTrueDamage) {
       const armorMult = this.bookStats ? (this.bookStats.armorMult || 1.0) : 1.0;
-      const effectiveArmor = Math.max(0, (this.armor * armorMult) * (1.0 - armorPenPercent) - armorPenFlat);
+      const armorFlatBonus = this.bookStats ? (this.bookStats.armorFlat || 0) : 0;
+      const effectiveArmor = Math.max(0, ((this.armor + armorFlatBonus) * armorMult) * (1.0 - armorPenPercent) - armorPenFlat);
+      const preArmorDamage = finalAmount;
       finalAmount = Math.max(1, finalAmount - effectiveArmor);
+      const blockedByArmor = preArmorDamage - finalAmount;
+
+      // Spinoza: Xung Kích Hình Học (Geometric Shockwave) phản lại 150% lượng sát thương giáp chặn
+      if (this.bookStats && this.bookStats.spinozaSubstantia && blockedByArmor > 0) {
+        const reflectDmg = Math.round(blockedByArmor * 1.50);
+        if (typeof window !== 'undefined' && window.__gameInstance && typeof window.__gameInstance.triggerSpinozaGeometricPulse === 'function') {
+          window.__gameInstance.triggerSpinozaGeometricPulse(this.x, this.y, reflectDmg);
+        }
+      }
 
       const totalDmgReduction = Math.min(0.75, this.damageReduction + (this.bookStats ? (this.bookStats.damageReduction || 0) : 0));
       if (totalDmgReduction > 0) {
@@ -297,6 +311,19 @@ export class Player {
     }
 
     finalAmount = Math.round(finalAmount);
+
+    // Kiểm tra Cơ chế Butler (Pha Hóa Giải: chuyển 100% sát thương thành Khiên và phản đòn 30% sát thương chuẩn)
+    if (this.bookStats && this.bookStats.hasButlerAbsorption) {
+      this.addShield(finalAmount);
+      if (particles) {
+        particles.createDamageNumber(this.x, this.y - 30, finalAmount, false, false, false, true, '#ec4899');
+      }
+      if (attackerEnemy && typeof attackerEnemy.takeDamage === 'function') {
+        attackerEnemy.takeDamage(Math.round(finalAmount * 0.30), { isTrueDamage: true }, particles);
+      }
+      this.invincibilityTimer = CONFIG.PLAYER.INVINCIBILITY_DURATION;
+      return false;
+    }
 
     // 3. Trừ Máu Ảo (Thanh Trắng) trước
     let absorbedByShield = 0;
@@ -325,8 +352,22 @@ export class Player {
       }
 
       if (this.health <= 0) {
+        // Kiểm tra Hồi Sinh Macondo từ Gabriel García Márquez (Hồi 100% HP, đóng băng 3s, mưa hoa vàng)
+        if (this.bookSystemRef && this.bookSystemRef.hasBook('marquez') && this.bookSystemRef.marquezCheatDeathCooldown <= 0) {
+          this.bookSystemRef.marquezCheatDeathCooldown = 240.0;
+          this.bookSystemRef.marquezCheatDeathActive = 3.0;
+          this.health = this.maxHealth;
+          this.invincibilityTimer = 3.0;
+          if (particles) {
+            particles.createDamageNumber(this.x, this.y - 45, 0, false, false, false, false, '#ffd700');
+            particles.createHitSparks(this.x, this.y, 45);
+          }
+          if (typeof window !== 'undefined' && window.__gameInstance && typeof window.__gameInstance.triggerMarquezMacondo === 'function') {
+            window.__gameInstance.triggerMarquezMacondo(this.x, this.y);
+          }
+        }
         // Kiểm tra Hồi Sinh từ Đại Tác Phẩm Hợp Thể (Lacan / Derrida / Marx)
-        if (this.bookSystemRef && this.bookSystemRef.hasExtraLife()) {
+        else if (this.bookSystemRef && this.bookSystemRef.hasExtraLife()) {
           const revivePercent = this.bookSystemRef.consumeExtraLife();
           this.health = Math.max(1, Math.round(this.maxHealth * revivePercent));
           this.invincibilityTimer = 2.5; // Bất tử 2.5s khi hồi sinh
@@ -373,6 +414,34 @@ export class Player {
 
     // Cập nhật chỉ số từ Hệ Thống Sách Tri Thức liên tục
     this.updateBookStats();
+
+    // Đặt lại hạn mức hút máu mỗi giây
+    this.lifestealSecTimer = (this.lifestealSecTimer || 0) + delta;
+    if (this.lifestealSecTimer >= 1.0) {
+      this.lifestealSecTimer = 0;
+      this.lifestealHealedThisSecond = 0;
+    }
+
+    // Cập nhật Bản Sao Bóng Ma Hộ Vệ (Lacan Echo Stand)
+    if (this.bookStats && this.bookStats.hasLacanPhantomStand) {
+      if (this.phantomX === undefined) {
+        this.phantomX = this.x - 70;
+        this.phantomY = this.y - 25;
+      }
+      const targetOffX = (this.facingRight ? -75 : 75);
+      const targetOffY = -25 + Math.sin(Date.now() * 0.005) * 8;
+      this.phantomX += (this.x + targetOffX - this.phantomX) * 0.12;
+      this.phantomY += (this.y + targetOffY - this.phantomY) * 0.12;
+
+      // Bản sao hộ vệ tấn công sau lưng mỗi 0.8s (gây 50% sát thương)
+      this.phantomAttackTimer = (this.phantomAttackTimer || 0) + delta;
+      if (this.phantomAttackTimer >= 0.80) {
+        this.phantomAttackTimer = 0;
+        if (typeof window !== 'undefined' && window.__gameInstance && typeof window.__gameInstance.triggerLacanPhantomAttack === 'function') {
+          window.__gameInstance.triggerLacanPhantomAttack(this.phantomX, this.phantomY, !this.facingRight);
+        }
+      }
+    }
 
     // Hồi chiêu kỹ năng đặc biệt [G]
     if (this.specialSkill) {
@@ -443,8 +512,16 @@ export class Player {
     }
 
     // --- CƠ CHẾ CHÍ MẠNG ĐA TẦNG VƯỢT 100% (MULTI-TIER CRIT / SIÊU CHÍ MẠNG) ---
-    const totalCritChance = this.critChance + (this.bookStats ? (this.bookStats.critChance || 0) : 0);
-    const totalCritDamage = this.critDamage + (this.bookStats ? (this.bookStats.critDamage || 0) : 0);
+    let extraMarquezCritChance = 0;
+    let extraMarquezCritDamage = 0;
+    if (this.bookSystemRef && this.bookSystemRef.hasBook('marquez') && this.maxHealth > 0) {
+      const missingHpPercent = Math.max(0, 1.0 - (this.health / this.maxHealth));
+      extraMarquezCritChance = missingHpPercent * 1.50; // +1.5% Crit Chance mỗi 1% máu mất
+      extraMarquezCritDamage = missingHpPercent * 2.00; // +2.0% Crit Damage mỗi 1% máu mất
+    }
+
+    const totalCritChance = this.critChance + (this.bookStats ? (this.bookStats.critChance || 0) : 0) + extraMarquezCritChance;
+    const totalCritDamage = this.critDamage + (this.bookStats ? (this.bookStats.critDamage || 0) : 0) + extraMarquezCritDamage;
 
     let critTier = 0;
     if (totalCritChance > 0) {
@@ -467,12 +544,18 @@ export class Player {
       finalIsTrueDamage = true;
     }
 
-    // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo + Sách
+    // Hiệu ứng Hút Máu từ Cây Kỹ Năng Thông Thạo + Sách (Có trần an toàn 15% Max HP/giây)
     const totalLifesteal = this.lifesteal + (this.bookStats ? (this.bookStats.lifesteal || 0) : 0);
     if (totalLifesteal > 0 && !this.noHeal && !this.isDead && this.health < this.maxHealth) {
-      const healed = finalDamage * totalLifesteal;
-      if (healed >= 1) {
-        this.heal(healed);
+      const maxLifestealPerSec = this.maxHealth * 0.15;
+      const remainingQuota = Math.max(0, maxLifestealPerSec - (this.lifestealHealedThisSecond || 0));
+      if (remainingQuota > 0) {
+        const potentialHeal = finalDamage * totalLifesteal;
+        const actualHeal = Math.min(remainingQuota, potentialHeal);
+        if (actualHeal >= 1) {
+          this.heal(actualHeal);
+          this.lifestealHealedThisSecond = (this.lifestealHealedThisSecond || 0) + actualHeal;
+        }
       }
     }
 

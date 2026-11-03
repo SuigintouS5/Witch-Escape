@@ -58,6 +58,9 @@ export class Enemy {
     this.slowTimer = 0;
     this.speedMultiplier = 1.0;
 
+    // Freeze (Đóng băng - từ Gabriel García Márquez)
+    this.freezeTimer = 0;
+
     this.sprite = getEnemySprite(typeConfig.sprite);
   }
 
@@ -141,6 +144,11 @@ export class Enemy {
       }
     }
 
+    // Freeze timer (Gabriel García Márquez)
+    if (this.freezeTimer > 0) {
+      this.freezeTimer -= delta;
+    }
+
     // Bleed & Zone DOT timers
     if (this.bleedTimer > 0) {
       this.bleedTimer -= delta;
@@ -202,7 +210,7 @@ export class Enemy {
       this.dotTickTimer = 0;
     }
 
-    if (this.isDead) return;
+    if (this.isDead || this.freezeTimer > 0) return;
 
     this.walkCycle += delta * 6;
 
@@ -279,7 +287,7 @@ export class Enemy {
   }
 
   render(ctx, camera) {
-    if (this.isDead) return;
+    if (this.isDead || this.freezeTimer > 0) return;
 
     const screenPos = camera.worldToScreen(this.x, this.y);
 
@@ -366,6 +374,12 @@ export class Enemy {
       // Viền cam khi bị thiêu
       ctx.strokeStyle = 'rgba(255, 120, 20, 0.7)';
       ctx.lineWidth = 2;
+      ctx.strokeRect(-this.width / 2, -this.height / 2, this.width, this.height);
+    }
+    if (this.freezeTimer > 0) {
+      // Viền vàng hổ phách Macondo / đóng băng thời gian
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.9)';
+      ctx.lineWidth = 3;
       ctx.strokeRect(-this.width / 2, -this.height / 2, this.width, this.height);
     }
 
