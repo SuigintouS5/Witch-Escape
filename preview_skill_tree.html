@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Cây Kỹ Năng Thông Thạo (Cân Bằng Chỉ Số - 3 Tabs)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: #070a12;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      user-select: none;
+    }
+    .square-node {
+      transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .square-node:hover:not(.locked) {
+      transform: translateY(-3px) scale(1.03);
+      box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.8);
+    }
+    .square-node.locked {
+      filter: grayscale(90%) opacity(0.38);
+      cursor: not-allowed;
+    }
+    .square-node.active {
+      box-shadow: 0 0 20px var(--glow-color);
+    }
+    .tab-btn {
+      transition: all 0.2s ease;
+    }
+    .connector-line {
+      transition: stroke 0.3s ease, stroke-width 0.3s ease, filter 0.3s ease;
+    }
+  </style>
+</head>
+<body class="p-4 md:p-6 text-slate-100 min-h-screen">
+
+  <!-- TOP HEADER & MASTER POINTS BAR -->
+  <div class="max-w-6xl mx-auto bg-slate-900/90 border border-slate-800 rounded-2xl p-4 md:p-5 mb-5 shadow-2xl backdrop-blur-md">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3.5">
+        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center text-2xl shadow-lg shadow-amber-500/20">
+          🌳
+        </div>
+        <div>
+          <h1 class="text-xl md:text-2xl font-black bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">
+            CÂY KỸ NĂNG THÔNG THẠO (BẢN CÂN BẰNG TOÀN DIỆN)
+          </h1>
+          <p class="text-xs md:text-sm text-slate-400">
+            Nút hình vuông phân nhánh 5 tầng • 3 Tab chuyển đổi • Giới hạn 100 điểm Mastery • Chỉ số cân đối chuẩn xác
+          </p>
+        </div>
+      </div>
+
+      <!-- POINTS TRACKER & CONTROLS -->
+      <div class="flex items-center gap-3 bg-slate-950/90 border border-slate-800 px-5 py-2.5 rounded-xl">
+        <div class="text-right">
+          <div class="text-[11px] text-slate-400 uppercase font-semibold">Điểm Kỹ Năng Còn Lại</div>
+          <div class="text-2xl font-black text-amber-400 font-mono tracking-wide" id="points-display">
+            100 <span class="text-sm font-normal text-slate-400">/ 100</span>
+          </div>
+        </div>
+        <div class="h-9 w-px bg-slate-800 mx-1"></div>
+        <div class="flex flex-col gap-1">
+          <button onclick="resetCurrentTab()" class="px-3 py-1 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded text-[11px] font-bold transition flex items-center gap-1 active:scale-95">
+            <span>↩️</span> Tẩy Nhánh Này
+          </button>
+          <button onclick="resetAllPoints()" class="px-3 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/30 rounded text-[11px] font-bold transition flex items-center gap-1 active:scale-95">
+            <span>🔄</span> Tẩy Tất Cả 100đ
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 MAIN TABS -->
+    <div class="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-800/80">
+      <button onclick="switchTab('green')" id="tab-btn-green" class="tab-btn py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border bg-emerald-950/60 border-emerald-500 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+        <span class="text-lg">🛡️</span>
+        <span>1. SINH TỒN & PHÒNG THỦ</span>
+        <span class="text-xs font-mono ml-1 px-1.5 py-0.5 rounded bg-emerald-900/60 border border-emerald-700/60" id="tab-badge-green">0đ</span>
+      </button>
+
+      <button onclick="switchTab('red')" id="tab-btn-red" class="tab-btn py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border bg-slate-950/60 border-slate-800 text-slate-400 hover:text-rose-300 hover:border-rose-900/50">
+        <span class="text-lg">⚔️</span>
+        <span>2. TẤN CÔNG & HỦY DIỆT</span>
+        <span class="text-xs font-mono ml-1 px-1.5 py-0.5 rounded bg-rose-900/60 border border-rose-700/60" id="tab-badge-red">0đ</span>
+      </button>
+
+      <button onclick="switchTab('yellow')" id="tab-btn-yellow" class="tab-btn py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border bg-slate-950/60 border-slate-800 text-slate-400 hover:text-amber-300 hover:border-amber-900/50">
+        <span class="text-lg">⚡</span>
+        <span>3. TIỆN ÍCH & NĂNG LƯỢNG</span>
+        <span class="text-xs font-mono ml-1 px-1.5 py-0.5 rounded bg-amber-900/60 border border-amber-700/60" id="tab-badge-yellow">0đ</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT: SKILL TREE CANVAS + LIVE STATS SIDEBAR -->
+  <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+    <!-- LEFT: THE BRANCHING SKILL TREE GRAPH (3 COLS ON DESKTOP) -->
+    <div class="lg:col-span-3 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 relative min-h-[750px] flex flex-col justify-between overflow-hidden shadow-xl">
+      <!-- SVG CONNECTOR LINES -->
+      <svg class="absolute inset-0 w-full h-full pointer-events-none z-0" id="tree-svg"></svg>
+
+      <!-- TIER 1: ROOT NODE (1 Nút Ở Giữa) -->
+      <div class="z-10 flex justify-center w-full">
+        <div id="slot-tier1"></div>
+      </div>
+
+      <!-- TIER 2: 2 NÚT RẼ NHÁNH (Trái & Phải) -->
+      <div class="z-10 flex justify-around w-full px-6">
+        <div id="slot-tier2-left"></div>
+        <div id="slot-tier2-right"></div>
+      </div>
+
+      <!-- TIER 3: 3 NÚT CHUYÊN SÂU (Trái, Giữa, Phải) -->
+      <div class="z-10 flex justify-between w-full px-2 gap-2">
+        <div id="slot-tier3-left"></div>
+        <div id="slot-tier3-mid"></div>
+        <div id="slot-tier3-right"></div>
+      </div>
+
+      <!-- TIER 4: 2 NÚT NÂNG CAO (Hội tụ) -->
+      <div class="z-10 flex justify-around w-full px-12">
+        <div id="slot-tier4-left"></div>
+        <div id="slot-tier4-right"></div>
+      </div>
+
+      <!-- TIER 5: KEYSTONE TỐI THƯỢNG (1 Nút Đáy) -->
+      <div class="z-10 flex justify-center w-full">
+        <div id="slot-tier5"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: LIVE REAL GAME STATS PANEL -->
+    <div class="lg:col-span-1 bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col">
+      <div class="flex items-center gap-2 pb-3 border-b border-slate-800 mb-3">
+        <span class="text-lg">📊</span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Chỉ Số Thực Nhận</h2>
+      </div>
+
+      <div class="text-[11px] text-slate-400 mb-2 italic">
+        *Cân bằng hợp lý, tương ứng 100% thuộc tính engine game:
+      </div>
+
+      <div class="space-y-1.5 overflow-y-auto max-h-[640px] pr-1" id="live-stats-list">
+        <!-- Render động danh sách chỉ số -->
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TOOLTIP CHI TIẾT KHI HOVER HOẶC BẤM -->
+  <div id="tooltip" class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-xl bg-slate-900/95 border border-slate-700 p-4 rounded-xl shadow-2xl z-50 pointer-events-none opacity-0 transition-opacity duration-200 backdrop-blur-md">
+    <div class="flex items-start justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div id="tt-icon" class="text-3xl p-2 rounded-lg bg-slate-800 border border-slate-700"></div>
+        <div>
+          <h3 id="tt-name" class="font-bold text-base text-white"></h3>
+          <div id="tt-level" class="text-xs text-amber-400 font-mono"></div>
+        </div>
+      </div>
+      <div id="tt-cost" class="text-right text-xs bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 font-mono font-bold text-amber-300"></div>
+    </div>
+    <div id="tt-desc" class="text-xs text-slate-300 mt-2.5 leading-relaxed"></div>
+    <div id="tt-effect" class="text-xs text-emerald-400 font-semibold mt-1.5"></div>
+    <div id="tt-status" class="text-[11px] text-slate-500 mt-2 border-t border-slate-800 pt-1.5 italic"></div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // HỆ THỐNG CHỈ SỐ CÂN BẰNG MỚI (BALANCED REWORK)
+    // =========================================================================
+    const SKILL_NODES = {
+      // -----------------------------------------------------------------------
+      // TAB 1: SINH TỒN & PHÒNG THỦ (GREEN)
+      // -----------------------------------------------------------------------
+      s1: {
+        id: 's1', branch: 'green', slot: 'slot-tier1', tier: 1,
+        name: 'Thể Chất Bền Bỉ', icon: '❤️',
+        costPerLevel: 1, maxLevel: 5, currentLevel: 0,
+        req: null,
+        desc: 'Gia tăng sinh mệnh cơ bản giúp chịu đựng các đợt bão quái đầu trận.',
+        format: (lvl) => `+${lvl * 80} Máu Tối Đa (Max +400 HP)`
+      },
+      s2: {
+        id: 's2', branch: 'green', slot: 'slot-tier2-left', tier: 2,
+        name: 'Giáp Cứng Cổ Đại', icon: '🛡️',
+        costPerLevel: 2, maxLevel: 3, currentLevel: 0,
+        req: 's1',
+        desc: 'Lớp giáp phòng thủ cứng cáp hấp thụ trực tiếp sát thương đòn đánh từ quái.',
+        format: (lvl) => `+${lvl * 5} Điểm Giáp Cứng (Max +15 Giáp)`
+      },
+      s3: {
+        id: 's3', branch: 'green', slot: 'slot-tier2-right', tier: 2,
+        name: 'Bộ Pháp Mau Lẹ', icon: '👟',
+        costPerLevel: 2, maxLevel: 3, currentLevel: 0,
+        req: 's1',
+        desc: 'Luyện tập bước chân linh hoạt giúp giữ khoảng cách an toàn và né đòn.',
+        format: (lvl) => `+${(lvl * 2.0).toFixed(1)}% Tốc Chạy & +${(lvl * 1.5).toFixed(1)}% Né Tránh`
+      },
+      s4: {
+        id: 's4', branch: 'green', slot: 'slot-tier3-left', tier: 3,
+        name: 'Huyết Mạch Tái Sinh', icon: '🌿',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 's2',
+        desc: 'Tự động hồi phục sinh lực thần kỳ mỗi giây không phụ thuộc vào bình máu.',
+        format: (lvl) => `+${lvl * 4.0} Máu Hồi/Giây (Max +12 HP/s)`
+      },
+      s5: {
+        id: 's5', branch: 'green', slot: 'slot-tier3-mid', tier: 3,
+        name: 'Cường Hóa Hộ Giáp', icon: '🔰',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: ['s2', 's3'],
+        desc: 'Hệ số giảm sát thương theo phần trăm độc lập với Giáp cứng (tối đa +7.5%).',
+        format: (lvl) => `+${(lvl * 2.5).toFixed(1)}% Giảm Sát Thương % (Max +7.5%)`
+      },
+      s6: {
+        id: 's6', branch: 'green', slot: 'slot-tier3-right', tier: 3,
+        name: 'Hấp Huyết Ma Pháp', icon: '🩸',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 's3',
+        desc: 'Đòn đánh có tỉ lệ hút trực tiếp sát thương chuyển thành Máu hồi phục.',
+        format: (lvl) => `+${(lvl * 0.3).toFixed(1)}% Hút Máu Đòn Đánh (Max +0.9%)`
+      },
+      s7: {
+        id: 's7', branch: 'green', slot: 'slot-tier4-left', tier: 4,
+        name: 'Gai Nhọn Phản Kích', icon: '🦔',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['s4', 's5'],
+        desc: 'Phản đòn sát thương cố định và theo phần trăm lên kẻ địch dám tấn công.',
+        format: (lvl) => `Phản đòn +${lvl * 80} cố định & +${(lvl * 2.5).toFixed(1)}% Sát thương nhận`
+      },
+      s8: {
+        id: 's8', branch: 'green', slot: 'slot-tier4-right', tier: 4,
+        name: 'Thần Tốc Né Đòn', icon: '💨',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['s5', 's6'],
+        desc: 'Tăng mạnh tỉ lệ né tránh; né thành công giúp hồi phục ngay một phần Máu.',
+        format: (lvl) => `+${lvl * 2.5}% Né Tránh & Khi né thành công hồi ${lvl * 3}% Máu`
+      },
+      s9: {
+        id: 's9', branch: 'green', slot: 'slot-tier5', tier: 5,
+        name: 'Bất Tử Niết Bàn', icon: '👑',
+        costPerLevel: 12, maxLevel: 1, currentLevel: 0,
+        req: ['s7', 's8'],
+        isKeystone: true,
+        desc: '[KEYSTONE TỐI THƯỢNG] Khi chịu sát thương chí tử: Kích hoạt 1 LẦN DUY NHẤT trong trận -> nhận Khiên Bất Tử 3.0s, hồi ngay 50% Máu tối đa và đẩy lùi quái vật xung quanh.',
+        format: (lvl) => lvl > 0 ? 'ĐÃ KÍCH HOẠT (1 LẦN DUY NHẤT / TRẬN)' : 'Chưa kích hoạt'
+      },
+
+      // -----------------------------------------------------------------------
+      // TAB 2: TẤN CÔNG & HỦY DIỆT (RED)
+      // -----------------------------------------------------------------------
+      o1: {
+        id: 'o1', branch: 'red', slot: 'slot-tier1', tier: 1,
+        name: 'Uy Lực Linh Hồn', icon: '⚔️',
+        costPerLevel: 1, maxLevel: 5, currentLevel: 0,
+        req: null,
+        desc: 'Khuếch đại sát thương cơ bản cho toàn bộ vũ khí chính và vũ khí phụ.',
+        format: (lvl) => `+${lvl * 3}% Sát Thương Toàn Bộ Vũ Khí (Max +15%)`
+      },
+      o2: {
+        id: 'o2', branch: 'red', slot: 'slot-tier2-left', tier: 2,
+        name: 'Tâm Nhãn Bạo Kích', icon: '🎯',
+        costPerLevel: 2, maxLevel: 5, currentLevel: 0,
+        req: 'o1',
+        desc: 'Tập trung tâm nhãn gia tăng tỉ lệ tung đòn đánh chí mạng bùng nổ (Tối đa +10%).',
+        format: (lvl) => `+${(lvl * 2.0).toFixed(1)}% Tỉ Lệ Đánh Chí Mạng (Max +10.0%)`
+      },
+      o3: {
+        id: 'o3', branch: 'red', slot: 'slot-tier2-right', tier: 2,
+        name: 'Cuồng Nộ Bạo Kích', icon: '💥',
+        costPerLevel: 2, maxLevel: 3, currentLevel: 0,
+        req: 'o1',
+        desc: 'Tăng mạnh hệ số sát thương bạo kích nhân lên khi đánh trúng chỗ hiểm.',
+        format: (lvl) => `+${lvl * 10}% Sát Thương Chí Mạng (Max +30%)`
+      },
+      o4: {
+        id: 'o4', branch: 'red', slot: 'slot-tier3-left', tier: 3,
+        name: 'Xuyên Giáp Cố Định', icon: '🗡️',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 'o2',
+        desc: 'Bỏ qua một lượng giáp cố định của quái vật giúp gây trọn sát thương.',
+        format: (lvl) => `+${lvl * 6} Điểm Xuyên Giáp Cố Định (Max +18)`
+      },
+      o5: {
+        id: 'o5', branch: 'red', slot: 'slot-tier3-mid', tier: 3,
+        name: 'Mũi Nhọn Chuẩn Xác', icon: '🏹',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: ['o2', 'o3'],
+        desc: 'Tăng độ chính xác khắc chế né tránh của quái và phá giáp theo %.',
+        format: (lvl) => `+${lvl * 3}% Chính Xác & Bỏ Qua ${lvl * 5}% Giáp Quái`
+      },
+      o6: {
+        id: 'o6', branch: 'red', slot: 'slot-tier3-right', tier: 3,
+        name: 'Phá Giới Diện Rộng', icon: '💣',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 'o3',
+        desc: 'Mở rộng kích thước kiếm, tầm quét và bán kính tác động của vũ khí.',
+        format: (lvl) => `+${lvl * 6}% Bán Kính Tác Động Vũ Khí (Max +18%)`
+      },
+      o7: {
+        id: 'o7', branch: 'red', slot: 'slot-tier4-left', tier: 4,
+        name: 'Trảm Sát Khát Máu', icon: '🩸',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['o4', 'o5'],
+        desc: 'Gia tăng sát thương dứt điểm lên kẻ địch khi máu tụt dưới 30%.',
+        format: (lvl) => `+${lvl * 15}% Sát Thương Lên Quái Máu Dưới 30%`
+      },
+      o8: {
+        id: 'o8', branch: 'red', slot: 'slot-tier4-right', tier: 4,
+        name: 'Cuồng Phong Đoạt Mệnh', icon: '⚡',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['o5', 'o6'],
+        desc: 'Khi tung đòn chí mạng tăng tốc độ di chuyển và tốc đánh trong 2 giây.',
+        format: (lvl) => `Chí Mạng: +${lvl * 5}% Tốc Chạy & +${lvl * 5}% Tốc Đánh (2s)`
+      },
+      o9: {
+        id: 'o9', branch: 'red', slot: 'slot-tier5', tier: 5,
+        name: 'Diệt Thế Bạo Kích', icon: '💀',
+        costPerLevel: 12, maxLevel: 1, currentLevel: 0,
+        req: ['o7', 'o8'],
+        isKeystone: true,
+        desc: '[KEYSTONE TỐI THƯỢNG] Mở khóa Đòn Bạo Kích Cực Hạn (Crit Bậc 2): Đòn đánh chí mạng có 10% cơ hội nhân x2.5 sát thương và phóng sóng xung kích chém quét 180px.',
+        format: (lvl) => lvl > 0 ? 'ĐÃ KÍCH HOẠT CHÍ MẠNG CỰC HẠN x2.5' : 'Chưa kích hoạt'
+      },
+
+      // -----------------------------------------------------------------------
+      // TAB 3: TIỆN ÍCH & NĂNG LƯỢNG (YELLOW)
+      // -----------------------------------------------------------------------
+      u1: {
+        id: 'u1', branch: 'yellow', slot: 'slot-tier1', tier: 1,
+        name: 'Khí Tốc Xuất Chiêu', icon: '⚡',
+        costPerLevel: 1, maxLevel: 5, currentLevel: 0,
+        req: null,
+        desc: 'Tăng tốc luân chuyển năng lượng giúp giảm thời gian hồi chiêu tất cả vũ khí.',
+        format: (lvl) => `-${lvl * 2}% Thời Gian Hồi Chiêu Tất Cả Vũ Khí (Max -10%)`
+      },
+      u2: {
+        id: 'u2', branch: 'yellow', slot: 'slot-tier2-left', tier: 2,
+        name: 'Từ Trường Hút Ngọc', icon: '🧲',
+        costPerLevel: 2, maxLevel: 3, currentLevel: 0,
+        req: 'u1',
+        desc: 'Mở rộng bán kính tự động hút Đá Kinh Nghiệm và Vàng rớt ra từ quái.',
+        format: (lvl) => `+${lvl * 16} Bán Kính Hút Ngọc & Vàng (Max +48)`
+      },
+      u3: {
+        id: 'u3', branch: 'yellow', slot: 'slot-tier2-right', tier: 2,
+        name: 'Bổng Lộc Hoàng Gia', icon: '🪙',
+        costPerLevel: 2, maxLevel: 3, currentLevel: 0,
+        req: 'u1',
+        desc: 'Gia tăng tài nguyên nhận được giúp nhanh chóng thăng tiến sức mạnh.',
+        format: (lvl) => `+${lvl * 4}% Vàng & +${(lvl * 3.5).toFixed(1)}% Kinh Nghiệm`
+      },
+      u4: {
+        id: 'u4', branch: 'yellow', slot: 'slot-tier3-left', tier: 3,
+        name: 'Quá Tải Hồi Kỹ Năng [G]', icon: '🌀',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 'u2',
+        desc: 'Cường hóa kỹ năng đặc biệt [Phím G] hồi phục nhanh chóng vượt trội.',
+        format: (lvl) => `Giảm -${lvl * 8}% Hồi Chiêu Kỹ Năng [G] (Max -24%)`
+      },
+      u5: {
+        id: 'u5', branch: 'yellow', slot: 'slot-tier3-mid', tier: 3,
+        name: 'May Mắn Thiên Mệnh', icon: '🎲',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: ['u2', 'u3'],
+        desc: 'Nhận thêm lượt Đổi Lại và Loại Bỏ thẻ bài mỗi khi lên cấp độ.',
+        format: (lvl) => lvl === 1 ? '+1 Lượt Đổi Lại (Reroll)' : (lvl === 2 ? '+1 Reroll & +1 Banish' : '+2 Reroll & +1 Banish')
+      },
+      u6: {
+        id: 'u6', branch: 'yellow', slot: 'slot-tier3-right', tier: 3,
+        name: 'Kho Tàng Thần Bí', icon: '✨',
+        costPerLevel: 3, maxLevel: 3, currentLevel: 0,
+        req: 'u3',
+        desc: 'Tăng cơ hội xuất hiện Rương Báu 3-5 món và tăng tỉ lệ rơi Bình Máu.',
+        format: (lvl) => `+${lvl * 6}% Rương Báu 3-5 Món & +${lvl * 10}% Rơi Bình Máu`
+      },
+      u7: {
+        id: 'u7', branch: 'yellow', slot: 'slot-tier4-left', tier: 4,
+        name: 'Tinh Hoa Nhân Vật', icon: '👑',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['u4', 'u5'],
+        desc: 'Cường hóa kỹ năng nội tại tối thượng độc quyền riêng biệt của nhân vật.',
+        format: (lvl) => `Cấp ${lvl}/2 Tinh Hoa Độc Quyền Riêng Từng Nhân Vật`
+      },
+      u8: {
+        id: 'u8', branch: 'yellow', slot: 'slot-tier4-right', tier: 4,
+        name: 'Siêu Nạp Năng Lượng', icon: '🔮',
+        costPerLevel: 4, maxLevel: 2, currentLevel: 0,
+        req: ['u5', 'u6'],
+        desc: 'Khi ăn Ngọc Kinh Nghiệm Đỏ hoặc Rương: Nhận hiệu ứng Siêu Nạp tăng tốc.',
+        format: (lvl) => `Ăn Ngọc Đỏ: +${lvl * 10}% Dmg & +${lvl * 8}% Tốc trong 4s`
+      },
+      u9: {
+        id: 'u9', branch: 'yellow', slot: 'slot-tier5', tier: 5,
+        name: 'Thời Không Ngưng Đọng', icon: '⏳',
+        costPerLevel: 12, maxLevel: 1, currentLevel: 0,
+        req: ['u7', 'u8'],
+        isKeystone: true,
+        desc: '[KEYSTONE TỐI THƯỢNG] Khi bấm phím [G] hoặc máu dưới 25%: Ngưng đọng thời gian toàn bộ quái vật trong 2.0 giây, tăng +50% tốc độ di chuyển cho bản thân (Hồi chiêu: 90s).',
+        format: (lvl) => lvl > 0 ? 'ĐÃ KÍCH HOẠT THỜI KHÔNG NGƯNG ĐỌNG' : 'Chưa kích hoạt'
+      }
+    };
+
+    let activeTab = 'green';
+    let remainingPoints = 100;
+    const MAX_POINTS = 100;
+
+    const BRANCH_LINKS = {
+      green: [
+        ['s1', 's2'], ['s1', 's3'],
+        ['s2', 's4'], ['s2', 's5'], ['s3', 's5'], ['s3', 's6'],
+        ['s4', 's7'], ['s5', 's7'], ['s5', 's8'], ['s6', 's8'],
+        ['s7', 's9'], ['s8', 's9']
+      ],
+      red: [
+        ['o1', 'o2'], ['o1', 'o3'],
+        ['o2', 'o4'], ['o2', 'o5'], ['o3', 'o5'], ['o3', 'o6'],
+        ['o4', 'o7'], ['o5', 'o7'], ['o5', 'o8'], ['o6', 'o8'],
+        ['o7', 'o9'], ['o8', 'o9']
+      ],
+      yellow: [
+        ['u1', 'u2'], ['u1', 'u3'],
+        ['u2', 'u4'], ['u2', 'u5'], ['u3', 'u5'], ['u3', 'u6'],
+        ['u4', 'u7'], ['u5', 'u7'], ['u5', 'u8'], ['u6', 'u8'],
+        ['u7', 'u9'], ['u8', 'u9']
+      ]
+    };
+
+    function isNodeUnlocked(nodeId) {
+      const node = SKILL_NODES[nodeId];
+      if (!node.req) return true;
+      if (Array.isArray(node.req)) {
+        return node.req.some(p => SKILL_NODES[p].currentLevel > 0);
+      }
+      return SKILL_NODES[node.req].currentLevel > 0;
+    }
+
+    function getPointsSpentInBranch(branch) {
+      let total = 0;
+      for (const k in SKILL_NODES) {
+        const n = SKILL_NODES[k];
+        if (n.branch === branch) {
+          total += n.currentLevel * n.costPerLevel;
+        }
+      }
+      return total;
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      const tabs = ['green', 'red', 'yellow'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (t === tab) {
+          const activeStyles = {
+            green: 'bg-emerald-950/80 border-emerald-500 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.25)]',
+            red: 'bg-rose-950/80 border-rose-500 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]',
+            yellow: 'bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+          }[t];
+          btn.className = `tab-btn py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border ${activeStyles}`;
+        } else {
+          btn.className = 'tab-btn py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200';
+        }
+      });
+      renderCurrentTree();
+      hideTooltip();
+    }
+
+    function renderCurrentTree() {
+      const slots = ['slot-tier1', 'slot-tier2-left', 'slot-tier2-right', 'slot-tier3-left', 'slot-tier3-mid', 'slot-tier3-right', 'slot-tier4-left', 'slot-tier4-right', 'slot-tier5'];
+      slots.forEach(s => {
+        const el = document.getElementById(s);
+        if (el) el.innerHTML = '';
+      });
+
+      for (const k in SKILL_NODES) {
+        const n = SKILL_NODES[k];
+        if (n.branch === activeTab) {
+          renderNodeInSlot(k);
+        }
+      }
+
+      setTimeout(drawSvgConnections, 20);
+    }
+
+    function renderNodeInSlot(nodeId) {
+      const n = SKILL_NODES[nodeId];
+      const slotEl = document.getElementById(n.slot);
+      if (!slotEl) return;
+
+      const unlocked = isNodeUnlocked(nodeId);
+      const isMax = n.currentLevel >= n.maxLevel;
+
+      const theme = {
+        green: {
+          border: 'border-emerald-500/40',
+          activeBorder: 'border-emerald-400',
+          activeBg: 'bg-emerald-950/90',
+          glow: 'rgba(16, 185, 129, 0.45)',
+          badge: 'bg-emerald-500/20 text-emerald-300',
+          accent: 'text-emerald-400'
+        },
+        red: {
+          border: 'border-rose-500/40',
+          activeBorder: 'border-rose-400',
+          activeBg: 'bg-rose-950/90',
+          glow: 'rgba(244, 63, 94, 0.45)',
+          badge: 'bg-rose-500/20 text-rose-300',
+          accent: 'text-rose-400'
+        },
+        yellow: {
+          border: 'border-amber-500/40',
+          activeBorder: 'border-amber-400',
+          activeBg: 'bg-amber-950/90',
+          glow: 'rgba(245, 158, 11, 0.45)',
+          badge: 'bg-amber-500/20 text-amber-300',
+          accent: 'text-amber-400'
+        }
+      }[n.branch];
+
+      const sizeClasses = n.isKeystone 
+        ? 'w-60 h-28 border-2 shadow-2xl' 
+        : (n.tier === 1 ? 'w-56 h-26 border-2' : 'w-48 h-24 border');
+
+      const bgClass = n.currentLevel > 0 ? theme.activeBg : 'bg-slate-950/95';
+      const borderClass = n.currentLevel > 0 ? theme.activeBorder : theme.border;
+      const glowStyle = n.currentLevel > 0 ? `--glow-color: ${theme.glow};` : '';
+
+      slotEl.innerHTML = `
+        <div class="square-node relative rounded-xl p-2.5 flex flex-col justify-between cursor-pointer ${sizeClasses} ${bgClass} ${borderClass} ${unlocked ? '' : 'locked'} ${n.currentLevel > 0 ? 'active' : ''}"
+             id="node-el-${nodeId}"
+             style="${glowStyle}"
+             onmouseenter="showTooltip('${nodeId}')"
+             onmouseleave="hideTooltip()"
+             onclick="upgradeNode('${nodeId}')">
+
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-2xl">${n.icon}</span>
+              <div class="text-xs font-bold text-slate-100 truncate max-w-[110px]">
+                ${n.name}
+              </div>
+            </div>
+            <span class="text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${theme.badge}">
+              ${n.currentLevel}/${n.maxLevel}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between mt-1 pt-1.5 border-t border-slate-800/80 text-[10px]">
+            <span class="text-slate-400 font-mono">
+              ${n.isKeystone ? '★ KEYSTONE' : `Tier ${n.tier}`} • <b class="text-amber-300 font-bold">${n.costPerLevel}đ</b>
+            </span>
+
+            <div class="flex items-center gap-1.5">
+              ${n.currentLevel > 0 ? `
+                <button onclick="event.stopPropagation(); refundNode('${nodeId}')" 
+                        class="w-6 h-6 rounded bg-rose-950 hover:bg-rose-700 border border-rose-600/60 text-rose-200 flex items-center justify-center font-bold text-xs active:scale-90" title="Hoàn 1 cấp">
+                  -
+                </button>
+              ` : ''}
+
+              ${!isMax && unlocked ? `
+                <button onclick="event.stopPropagation(); upgradeNode('${nodeId}')" 
+                        class="w-6 h-6 rounded ${remainingPoints >= n.costPerLevel ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed'} flex items-center justify-center font-bold text-xs active:scale-90" title="Nâng 1 cấp">
+                  +
+                </button>
+              ` : ''}
+            </div>
+          </div>
+
+          ${!unlocked ? `
+            <div class="absolute inset-0 bg-slate-950/80 rounded-xl flex items-center justify-center backdrop-blur-[1px]">
+              <span class="text-xl">🔒</span>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function canSafelyRefund(nodeId) {
+      const n = SKILL_NODES[nodeId];
+      if (n.currentLevel <= 0) return false;
+      if (n.currentLevel > 1) return true;
+
+      for (const k in SKILL_NODES) {
+        const child = SKILL_NODES[k];
+        if (child.branch === n.branch && child.currentLevel > 0) {
+          if (child.req === nodeId) return false;
+          if (Array.isArray(child.req) && child.req.includes(nodeId)) {
+            const otherActiveParent = child.req.some(p => p !== nodeId && SKILL_NODES[p].currentLevel > 0);
+            if (!otherActiveParent) return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function upgradeNode(nodeId) {
+      const n = SKILL_NODES[nodeId];
+      if (!isNodeUnlocked(nodeId)) return;
+      if (n.currentLevel >= n.maxLevel) return;
+      if (remainingPoints < n.costPerLevel) return;
+
+      n.currentLevel++;
+      remainingPoints -= n.costPerLevel;
+      updateUI();
+      showTooltip(nodeId);
+    }
+
+    function refundNode(nodeId) {
+      const n = SKILL_NODES[nodeId];
+      if (!canSafelyRefund(nodeId)) {
+        alert('Không thể hoàn điểm vì có kỹ năng tầng dưới đang phụ thuộc vào kỹ năng này!');
+        return;
+      }
+      n.currentLevel--;
+      remainingPoints += n.costPerLevel;
+      updateUI();
+      showTooltip(nodeId);
+    }
+
+    function resetCurrentTab() {
+      for (const k in SKILL_NODES) {
+        const n = SKILL_NODES[k];
+        if (n.branch === activeTab && n.currentLevel > 0) {
+          remainingPoints += n.currentLevel * n.costPerLevel;
+          n.currentLevel = 0;
+        }
+      }
+      updateUI();
+      hideTooltip();
+    }
+
+    function resetAllPoints() {
+      for (const k in SKILL_NODES) {
+        SKILL_NODES[k].currentLevel = 0;
+      }
+      remainingPoints = MAX_POINTS;
+      updateUI();
+      hideTooltip();
+    }
+
+    function drawSvgConnections() {
+      const svg = document.getElementById('tree-svg');
+      if (!svg) return;
+      svg.innerHTML = '';
+      const containerRect = svg.parentElement.getBoundingClientRect();
+
+      const links = BRANCH_LINKS[activeTab] || [];
+      const branchColors = {
+        green: { active: '#10b981', inactive: '#064e3b' },
+        red: { active: '#f43f5e', inactive: '#881337' },
+        yellow: { active: '#f59e0b', inactive: '#78350f' }
+      }[activeTab];
+
+      links.forEach(([pId, cId]) => {
+        const pEl = document.getElementById(`node-el-${pId}`);
+        const cEl = document.getElementById(`node-el-${cId}`);
+        if (!pEl || !cEl) return;
+
+        const pRect = pEl.getBoundingClientRect();
+        const cRect = cEl.getBoundingClientRect();
+
+        const x1 = pRect.left + pRect.width / 2 - containerRect.left;
+        const y1 = pRect.bottom - containerRect.top;
+        const x2 = cRect.left + cRect.width / 2 - containerRect.left;
+        const y2 = cRect.top - containerRect.top;
+
+        const isActive = SKILL_NODES[pId].currentLevel > 0;
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const dy = (y2 - y1) * 0.5;
+        const d = `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
+
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', isActive ? branchColors.active : branchColors.inactive);
+        path.setAttribute('stroke-width', isActive ? '2.5' : '1.5');
+        path.setAttribute('stroke-dasharray', isActive ? 'none' : '4 3');
+        if (isActive) {
+          path.setAttribute('style', `filter: drop-shadow(0 0 5px ${branchColors.active});`);
+        }
+        path.classList.add('connector-line');
+        svg.appendChild(path);
+      });
+    }
+
+    function showTooltip(nodeId) {
+      const n = SKILL_NODES[nodeId];
+      const tt = document.getElementById('tooltip');
+      document.getElementById('tt-icon').innerText = n.icon;
+      document.getElementById('tt-name').innerText = n.name;
+      document.getElementById('tt-level').innerText = `Cấp Độ: ${n.currentLevel} / ${n.maxLevel} ${n.isKeystone ? '★ KEYSTONE TỐI THƯỢNG' : `(Tier ${n.tier})`}`;
+      document.getElementById('tt-cost').innerText = `Chi phí: ${n.costPerLevel} Điểm / Cấp`;
+      document.getElementById('tt-desc').innerText = n.desc;
+      document.getElementById('tt-effect').innerText = `⚡ Hiệu lực: ${n.format(n.currentLevel)}`;
+
+      let statusMsg = '';
+      if (!isNodeUnlocked(nodeId)) {
+        statusMsg = '🔒 Nút đang bị khóa: Hãy nâng kỹ năng tầng trước để mở đường dẫn.';
+      } else if (n.currentLevel >= n.maxLevel) {
+        statusMsg = '⭐ Kỹ năng đã đạt cấp tối đa!';
+      } else if (remainingPoints < n.costPerLevel) {
+        statusMsg = `⚠️ Không đủ điểm (Cần ${n.costPerLevel}đ, còn lại ${remainingPoints}đ).`;
+      } else {
+        statusMsg = `💡 Bấm vào thẻ để nâng cấp (+${n.costPerLevel} điểm).`;
+      }
+      document.getElementById('tt-status').innerText = statusMsg;
+
+      tt.style.opacity = '1';
+    }
+
+    function hideTooltip() {
+      document.getElementById('tooltip').style.opacity = '0';
+    }
+
+    function updateLiveStatsPanel() {
+      const container = document.getElementById('live-stats-list');
+      if (!container) return;
+
+      const stats = [
+        { label: 'Máu Tối Đa (maxHealth)', val: `+${SKILL_NODES.s1.currentLevel * 80}`, color: 'text-emerald-400' },
+        { label: 'Giáp Cứng (armor)', val: `+${SKILL_NODES.s2.currentLevel * 5}`, color: 'text-emerald-400' },
+        { label: 'Tốc Độ Chạy (speed)', val: `+${(SKILL_NODES.s3.currentLevel * 2.0).toFixed(1)}%`, color: 'text-emerald-400' },
+        { label: 'Tỉ Lệ Né Tránh (dodge)', val: `+${(SKILL_NODES.s3.currentLevel * 1.5 + SKILL_NODES.s8.currentLevel * 2.5).toFixed(1)}%`, color: 'text-emerald-400' },
+        { label: 'Hồi Máu/Giây (regen)', val: `+${(SKILL_NODES.s4.currentLevel * 4.0).toFixed(1)}/s`, color: 'text-emerald-400' },
+        { label: 'Giảm Sát Thương % (DR)', val: `+${(SKILL_NODES.s5.currentLevel * 2.5).toFixed(1)}%`, color: 'text-emerald-400' },
+        { label: 'Hút Máu Đòn Đánh (lifesteal)', val: `+${(SKILL_NODES.s6.currentLevel * 0.3).toFixed(1)}%`, color: 'text-emerald-400' },
+        { label: 'Phản Đòn Cố Định', val: `+${SKILL_NODES.s7.currentLevel * 80}`, color: 'text-emerald-400' },
+        
+        { label: 'Sát Thương Vũ Khí (dmgMult)', val: `+${SKILL_NODES.o1.currentLevel * 3}%`, color: 'text-rose-400' },
+        { label: 'Tỉ Lệ Chí Mạng (critChance)', val: `+${(SKILL_NODES.o2.currentLevel * 2.0).toFixed(1)}% (Max 10%)`, color: 'text-rose-400' },
+        { label: 'Sát Thương Chí Mạng (critDmg)', val: `+${SKILL_NODES.o3.currentLevel * 10}%`, color: 'text-rose-400' },
+        { label: 'Xuyên Giáp Cố Định (flatPen)', val: `+${SKILL_NODES.o4.currentLevel * 6}`, color: 'text-rose-400' },
+        { label: 'Bỏ Qua Giáp Quái %', val: `+${SKILL_NODES.o5.currentLevel * 5}%`, color: 'text-rose-400' },
+        { label: 'Bán Kính Vũ Khí (AoE)', val: `+${SKILL_NODES.o6.currentLevel * 6}%`, color: 'text-rose-400' },
+        { label: 'Sát Thương Quái <30% HP', val: `+${SKILL_NODES.o7.currentLevel * 15}%`, color: 'text-rose-400' },
+
+        { label: 'Giảm Hồi Chiêu (CDR)', val: `-${SKILL_NODES.u1.currentLevel * 2}%`, color: 'text-amber-400' },
+        { label: 'Tầm Hút Ngọc (pickup)', val: `+${SKILL_NODES.u2.currentLevel * 16}`, color: 'text-amber-400' },
+        { label: 'Tăng Vàng & Kinh Nghiệm', val: `+${SKILL_NODES.u3.currentLevel * 4}% Vàng, +${(SKILL_NODES.u3.currentLevel * 3.5).toFixed(1)}% EXP`, color: 'text-amber-400' },
+        { label: 'Giảm Hồi Kỹ Năng [G]', val: `-${SKILL_NODES.u4.currentLevel * 8}%`, color: 'text-amber-400' },
+        { label: 'Lượt Reroll / Banish', val: `+${SKILL_NODES.u5.currentLevel >= 1 ? (SKILL_NODES.u5.currentLevel === 1 ? '1 Reroll' : (SKILL_NODES.u5.currentLevel === 2 ? '1 Reroll, 1 Banish' : '2 Reroll, 1 Banish')) : '0'}`, color: 'text-amber-400' },
+        { label: 'Rương 3-5 Món & Bình Máu', val: `+${SKILL_NODES.u6.currentLevel * 6}% Rương, +${SKILL_NODES.u6.currentLevel * 10}% Máu`, color: 'text-amber-400' }
+      ];
+
+      container.innerHTML = stats.map(s => `
+        <div class="flex items-center justify-between text-xs bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-800/80">
+          <span class="text-slate-400 font-medium">${s.label}</span>
+          <span class="font-mono font-bold ${s.color}">${s.val}</span>
+        </div>
+      `).join('');
+    }
+
+    function updateUI() {
+      document.getElementById('points-display').innerHTML = `
+        ${remainingPoints} <span class="text-sm font-normal text-slate-400">/ ${MAX_POINTS}</span>
+      `;
+
+      document.getElementById('tab-badge-green').innerText = `${getPointsSpentInBranch('green')}đ / 72đ`;
+      document.getElementById('tab-badge-red').innerText = `${getPointsSpentInBranch('red')}đ / 72đ`;
+      document.getElementById('tab-badge-yellow').innerText = `${getPointsSpentInBranch('yellow')}đ / 72đ`;
+
+      renderCurrentTree();
+      updateLiveStatsPanel();
+    }
+
+    window.addEventListener('resize', () => {
+      drawSvgConnections();
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>

@@ -19,6 +19,7 @@ import { TreasureBox } from './TreasureBox.js';
 import {
   MasterySystem,
   SKILL_TREE_DEFINITIONS,
+  BRANCH_LINKS,
   CHARACTER_SPECIAL_MASTERY
 } from './MasterySystem.js';
 import { BookSystem, BOOK_DEFINITIONS, STARTER_BOOK_IDS } from './BookSystem.js';
@@ -58,6 +59,11 @@ class Game {
     // Hệ thống Thông Thạo & Cây Kỹ Năng Nhân Vật (Mastery System)
     this.masterySystem = new MasterySystem();
     this.skillTreeSelectedCharId = 'sorceress'; // Tab nhân vật đang xem
+    this.skillTreeSelectedTab = 'green';        // 'green' (Sinh Tồn) | 'red' (Tấn Công) | 'yellow' (Tiện Ích)
+    this.selectedSkillNodeId = 's1';            // Nút kỹ năng đang chọn xem chi tiết
+    this.hoveredSkillNode = null;
+    this.mouseX = 0;
+    this.mouseY = 0;
 
     // Quản lý Trạng thái Màn hình Game (State Machine)
     // 'MAIN_MENU' | 'CHAR_SELECT' | 'MODE_SELECT' | 'CHALLENGE_SELECT' | 'DIFF_SELECT' | 'SHOP' | 'SKILL_TREE' | 'PLAYING' | 'GAME_OVER'
@@ -162,6 +168,12 @@ class Game {
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    this.canvas.addEventListener('contextmenu', (e) => {
+      if (this.gameState === 'SKILL_TREE') {
+        e.preventDefault();
+        this.onSkillTreeRightClick(e);
+      }
+    });
 
     // Tự động căn chỉnh & dãn giao diện theo đúng độ phân giải màn hình
     this.resizeCanvas();
@@ -232,9 +244,9 @@ class Game {
     this.skillManager = new SkillManager();
     this.skillManager.classSkillBuff = metaBonuses.classSkillBuff || 0;
 
-    // Reroll & Banish riêng cho từng trận (dùng là mất)
-    this.rerollCount = metaBonuses.bonusRerolls || 0;
-    this.banishCount = metaBonuses.bonusBanishes || 0;
+    // Reroll & Banish riêng cho từng trận (kết hợp Meta Shop và Cây Kỹ Năng Thông Thạo)
+    this.rerollCount = (metaBonuses.bonusRerolls || 0) + (masteryBonuses.bonusReroll || 0);
+    this.banishCount = (metaBonuses.bonusBanishes || 0) + (masteryBonuses.bonusBanish || 0);
     this.banishedItemIds = new Set();
     this.isBanishModeActive = false;
 
@@ -813,11 +825,14 @@ class Game {
   }
 
   onMouseMove(e) {
+    const { mouseX, mouseY } = this.getCanvasMousePos(e);
+    this.mouseX = mouseX;
+    this.mouseY = mouseY;
+
     if (this.gameState === 'PLAYING') {
       this.canvas.style.cursor = 'default';
       return;
     }
-    const { mouseX, mouseY } = this.getCanvasMousePos(e);
 
     let hovering = false;
     for (let i = this.menuButtons.length - 1; i >= 0; i--) {
@@ -831,6 +846,37 @@ class Game {
       }
     }
     this.canvas.style.cursor = hovering ? 'pointer' : 'default';
+  }
+
+  onSkillTreeRightClick(e) {
+    const { mouseX, mouseY } = this.getCanvasMousePos(e);
+    for (let i = this.menuButtons.length - 1; i >= 0; i--) {
+      const btn = this.menuButtons[i];
+      if (
+        mouseX >= btn.x && mouseX <= btn.x + btn.w &&
+        mouseY >= btn.y && mouseY <= btn.y + btn.h
+      ) {
+        if (btn.id.startsWith('select_skill_node_') || btn.id.startsWith('allocate_skill_')) {
+          const nodeId = btn.id.replace('select_skill_node_', '').replace('allocate_skill_', '');
+          this.selectedSkillNodeId = nodeId;
+          const def = SKILL_TREE_DEFINITIONS[nodeId];
+          if (!def) return;
+          const char = this.masterySystem.getCharData(this.skillTreeSelectedCharId);
+          const cur = (char.skills && char.skills[nodeId]) || 0;
+          if (cur <= 0) {
+            this.showSkillTreeToast(`ℹ️ ${def.name} chưa cộng điểm nào để hoàn!`, '#f59e0b');
+          } else if (!this.masterySystem.canSafelyRefund(this.skillTreeSelectedCharId, nodeId)) {
+            this.showSkillTreeToast(`⚠️ Đang có kỹ năng tầng sau phụ thuộc vào nút này, không thể hoàn!`, '#f43f5e');
+          } else {
+            const ok = this.masterySystem.refundSkill(this.skillTreeSelectedCharId, nodeId);
+            if (ok) {
+              this.showSkillTreeToast(`↩️ Đã hoàn lại ${def.costPerLevel} điểm từ: ${def.name}!`, '#fb923c');
+            }
+          }
+          return;
+        }
+      }
+    }
   }
 
   showSkillTreeToast(text, color = '#22c55e') {
@@ -1282,6 +1328,15 @@ class Game {
       this.gameState = 'SKILL_TREE';
     } else if (actionId.startsWith('select_skill_char_')) {
       this.skillTreeSelectedCharId = actionId.replace('select_skill_char_', '');
+      const defaultNodes = { green: 's1', red: 'o1', yellow: 'u1' };
+      this.selectedSkillNodeId = defaultNodes[this.skillTreeSelectedTab] || 's1';
+    } else if (actionId.startsWith('switch_skill_tree_tab_')) {
+      const tab = actionId.replace('switch_skill_tree_tab_', '');
+      this.skillTreeSelectedTab = tab;
+      const defaultNodes = { green: 's1', red: 'o1', yellow: 'u1' };
+      this.selectedSkillNodeId = defaultNodes[tab] || 's1';
+    } else if (actionId.startsWith('select_skill_node_')) {
+      this.selectedSkillNodeId = actionId.replace('select_skill_node_', '');
     } else if (actionId === 'level_up_mastery') {
       const ok = this.masterySystem.levelUpMastery(this.skillTreeSelectedCharId);
       if (ok) {
@@ -1301,31 +1356,50 @@ class Game {
       this.showSkillTreeToast('🎁 Đã nhận +10,000 Score thử nghiệm thành công!', '#eab308');
     } else if (actionId.startsWith('allocate_skill_')) {
       const skillKey = actionId.replace('allocate_skill_', '');
+      this.selectedSkillNodeId = skillKey;
       const char = this.masterySystem.getCharData(this.skillTreeSelectedCharId);
       const def = SKILL_TREE_DEFINITIONS[skillKey];
-      const cur = (char.skills && char.skills[skillKey]) || 0;
-      if (cur >= (def ? def.maxLevel : 10)) {
-        this.showSkillTreeToast(`⭐ ${def ? def.name : skillKey} đã đạt cấp tối đa (10/10)!`, '#f59e0b');
-      } else if (char.skillPoints <= 0) {
-        this.showSkillTreeToast('⚠️ Chưa có Điểm Kỹ Năng! Hãy Nâng Cấp Thông Thạo trước (hoặc bấm +10K Score).', '#f43f5e');
-      } else {
-        const ok = this.masterySystem.allocateSkill(this.skillTreeSelectedCharId, skillKey);
-        if (ok) {
-          this.showSkillTreeToast(`✨ Đã nâng cấp: ${def ? def.name : skillKey}!`, '#c084fc');
+      if (def) {
+        const cur = (char.skills && char.skills[skillKey]) || 0;
+        if (!this.masterySystem.isNodeUnlocked(this.skillTreeSelectedCharId, skillKey)) {
+          this.showSkillTreeToast('🔒 Cần mở khóa ít nhất 1 kỹ năng ở tầng trước!', '#f43f5e');
+        } else if (cur >= def.maxLevel) {
+          this.showSkillTreeToast(`⭐ ${def.name} đã đạt cấp tối đa (${def.maxLevel}/${def.maxLevel})!`, '#f59e0b');
+        } else if (char.skillPoints < def.costPerLevel) {
+          this.showSkillTreeToast(`⚠️ Cần ${def.costPerLevel} Điểm Kỹ Năng (Bạn đang có ${char.skillPoints}đ)!`, '#f43f5e');
+        } else {
+          const ok = this.masterySystem.allocateSkill(this.skillTreeSelectedCharId, skillKey);
+          if (ok) {
+            this.showSkillTreeToast(`✨ Đã nâng cấp: ${def.name} (${cur + 1}/${def.maxLevel})!`, '#4ade80');
+          }
         }
       }
     } else if (actionId.startsWith('refund_skill_')) {
       const skillKey = actionId.replace('refund_skill_', '');
+      this.selectedSkillNodeId = skillKey;
       const char = this.masterySystem.getCharData(this.skillTreeSelectedCharId);
       const def = SKILL_TREE_DEFINITIONS[skillKey];
-      const cur = (char.skills && char.skills[skillKey]) || 0;
-      if (cur <= 0) {
-        this.showSkillTreeToast(`ℹ️ ${def ? def.name : skillKey} chưa được cộng điểm nào để hoàn!`, '#f59e0b');
-      } else {
-        const ok = this.masterySystem.refundSkill(this.skillTreeSelectedCharId, skillKey);
-        if (ok) {
-          this.showSkillTreeToast(`↩️ Đã hoàn lại 1 điểm từ: ${def ? def.name : skillKey}!`, '#fb923c');
+      if (def) {
+        const cur = (char.skills && char.skills[skillKey]) || 0;
+        if (cur <= 0) {
+          this.showSkillTreeToast(`ℹ️ ${def.name} chưa cộng điểm nào để hoàn!`, '#f59e0b');
+        } else if (!this.masterySystem.canSafelyRefund(this.skillTreeSelectedCharId, skillKey)) {
+          this.showSkillTreeToast('⚠️ Đang có kỹ năng tầng sau phụ thuộc vào nút này, không thể hoàn!', '#f43f5e');
+        } else {
+          const ok = this.masterySystem.refundSkill(this.skillTreeSelectedCharId, skillKey);
+          if (ok) {
+            this.showSkillTreeToast(`↩️ Đã hoàn lại ${def.costPerLevel} điểm từ: ${def.name}!`, '#fb923c');
+          }
         }
+      }
+    } else if (actionId.startsWith('reset_skill_branch_')) {
+      const branch = actionId.replace('reset_skill_branch_', '');
+      const refunded = this.masterySystem.resetBranch(this.skillTreeSelectedCharId, branch);
+      const branchNames = { green: 'Sinh Tồn & Phòng Thủ', red: 'Tấn Công & Hủy Diệt', yellow: 'Tiện Ích & Năng Lượng' };
+      if (refunded > 0) {
+        this.showSkillTreeToast(`🔄 Đã tẩy nhánh ${branchNames[branch] || branch}! Hoàn lại +${refunded} Điểm Kỹ Năng.`, '#38bdf8');
+      } else {
+        this.showSkillTreeToast(`ℹ️ Nhánh ${branchNames[branch] || branch} chưa có điểm nào để tẩy!`, '#f59e0b');
       }
     } else if (actionId === 'reset_mastery_skills') {
       const refunded = this.masterySystem.resetSkills(this.skillTreeSelectedCharId);
@@ -4620,97 +4694,98 @@ class Game {
 
   // =========================================================================
   // GIAO DIỆN CÂY KỸ NĂNG VÀ THÔNG THẠO NHÂN VẬT (CHARACTER MASTERY & SKILL TREE)
+  // Cây kỹ năng 3 Tab chuyển đổi • Nút hình vuông 5 tầng • Cân bằng chỉ số 100 điểm
   // =========================================================================
   renderSkillTree() {
     this.ctx.save();
 
-    // Nền tối ma thuật huyền bí
-    this.ctx.fillStyle = '#080511';
+    // 1. Nền Tối Huyền Bí & Vầng Hào Quang Công Nghệ
+    this.ctx.fillStyle = '#070913';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Vầng hào quang ánh sáng ma thuật nền
     const bgGrad = this.ctx.createRadialGradient(
-      this.canvas.width / 2, 280, 50,
-      this.canvas.width / 2, 400, 900
+      this.canvas.width / 2, 320, 60,
+      this.canvas.width / 2, 450, 950
     );
-    bgGrad.addColorStop(0, 'rgba(88, 28, 135, 0.28)');
-    bgGrad.addColorStop(1, 'rgba(8, 5, 17, 0)');
+    bgGrad.addColorStop(0, 'rgba(30, 20, 60, 0.45)');
+    bgGrad.addColorStop(1, 'rgba(7, 9, 19, 0)');
     this.ctx.fillStyle = bgGrad;
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // 1. Tiêu Đề Chính
-    this.ctx.fillStyle = '#ffd166';
-    this.ctx.font = 'bold 40px "Segoe UI", serif';
+    // 2. Tiêu Đề Chính
+    this.ctx.fillStyle = '#fde047';
+    this.ctx.font = 'bold 34px "Segoe UI", serif';
     this.ctx.textAlign = 'center';
-    this.ctx.shadowColor = '#d946ef';
-    this.ctx.shadowBlur = 22;
-    this.ctx.fillText('✨ CÂY KỸ NĂNG & THÔNG THẠO NHÂN VẬT', this.canvas.width / 2, 48);
+    this.ctx.shadowColor = '#eab308';
+    this.ctx.shadowBlur = 18;
+    this.ctx.fillText('✨ CÂY KỸ NĂNG & THÔNG THẠO ANH HÙNG (HERO MASTERY)', this.canvas.width / 2, 38);
 
     this.ctx.shadowBlur = 0;
-    this.ctx.fillStyle = '#cbd5e1';
-    this.ctx.font = '15px sans-serif';
-    this.ctx.fillText('Dùng điểm Score tích lũy của nhân vật để tăng cấp Thông Thạo (Cấp 1 - 100) và nhận Điểm Kỹ Năng cường hóa vĩnh viễn', this.canvas.width / 2, 76);
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '13px sans-serif';
+    this.ctx.fillText('Nâng cấp Thông Thạo (Cấp 1 - 100) • Cây kỹ năng 3 nhánh phân tầng độc lập • Tối đa 100 Điểm Mastery', this.canvas.width / 2, 60);
 
-    // 2. Thanh Tabs Chuyển Đổi Nhân Vật
-    const tabW = 320;
-    const tabH = 46;
-    const tabGap = 25;
-    const totalTabW = tabW * CONFIG.CHARACTERS.length + tabGap * (CONFIG.CHARACTERS.length - 1);
-    const tabStartX = (this.canvas.width - totalTabW) / 2;
-    const tabY = 96;
+    // 3. Tabs Chuyển Đổi Nhân Vật
+    const charTabW = 280;
+    const charTabH = 38;
+    const charTabGap = 20;
+    const totalCharTabW = charTabW * CONFIG.CHARACTERS.length + charTabGap * (CONFIG.CHARACTERS.length - 1);
+    const charTabStartX = (this.canvas.width - totalCharTabW) / 2;
+    const charTabY = 72;
 
     for (let i = 0; i < CONFIG.CHARACTERS.length; i++) {
       const c = CONFIG.CHARACTERS[i];
-      const tx = tabStartX + i * (tabW + tabGap);
+      const tx = charTabStartX + i * (charTabW + charTabGap);
       const isTabSelected = (c.id === this.skillTreeSelectedCharId);
       const cMastery = this.masterySystem.getCharData(c.id);
 
-      this.ctx.fillStyle = isTabSelected ? '#581c87' : 'rgba(20, 15, 35, 0.85)';
-      this.ctx.fillRect(tx, tabY, tabW, tabH);
-      this.ctx.strokeStyle = isTabSelected ? '#fbbf24' : '#475569';
-      this.ctx.lineWidth = isTabSelected ? 2.5 : 1.2;
-      this.ctx.strokeRect(tx, tabY, tabW, tabH);
+      this.ctx.fillStyle = isTabSelected ? 'rgba(76, 29, 149, 0.9)' : 'rgba(17, 24, 39, 0.85)';
+      this.ctx.fillRect(tx, charTabY, charTabW, charTabH);
+      this.ctx.strokeStyle = isTabSelected ? '#fbbf24' : '#334155';
+      this.ctx.lineWidth = isTabSelected ? 2.2 : 1.0;
+      this.ctx.strokeRect(tx, charTabY, charTabW, charTabH);
 
       this.ctx.fillStyle = isTabSelected ? '#fde047' : '#94a3b8';
-      this.ctx.font = isTabSelected ? 'bold 16px "Segoe UI", sans-serif' : '15px "Segoe UI", sans-serif';
+      this.ctx.font = isTabSelected ? 'bold 15px "Segoe UI", sans-serif' : '14px "Segoe UI", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(`${c.name} (Lv.${cMastery.level}/100)`, tx + tabW / 2, tabY + 29);
+      this.ctx.fillText(`${c.name} (Lv.${cMastery.level}/100)`, tx + charTabW / 2, charTabY + 24);
 
-      this.menuButtons.push({ x: tx, y: tabY, w: tabW, h: tabH, id: 'select_skill_char_' + c.id });
+      this.menuButtons.push({ x: tx, y: charTabY, w: charTabW, h: charTabH, id: 'select_skill_char_' + c.id });
     }
 
-    // 3. Khung Thông Tin Thông Thạo Nhân Vật Hiện Tại
+    // 4. Banner Thông Tin Thông Thạo Nhân Vật Hiện Tại
     const selectedCharConfig = CONFIG.CHARACTERS.find(c => c.id === this.skillTreeSelectedCharId) || CONFIG.CHARACTERS[0];
     const charMastery = this.masterySystem.getCharData(selectedCharConfig.id);
     const neededScore = this.masterySystem.getRequiredScore(charMastery.level);
     const isMaxMastery = charMastery.level >= 100;
     const canLevelUp = !isMaxMastery && charMastery.score >= neededScore;
+    const totalSpentPoints = this.masterySystem.getTotalPointsSpent(selectedCharConfig.id);
 
     const bannerX = 50;
-    const bannerY = 155;
+    const bannerY = 118;
     const bannerW = this.canvas.width - 100;
-    const bannerH = 106;
+    const bannerH = 78;
 
-    this.ctx.fillStyle = 'rgba(22, 14, 40, 0.94)';
+    this.ctx.fillStyle = 'rgba(15, 12, 28, 0.94)';
     this.ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
-    this.ctx.strokeStyle = '#7c3aed';
-    this.ctx.lineWidth = 2;
+    this.ctx.strokeStyle = '#4338ca';
+    this.ctx.lineWidth = 1.8;
     this.ctx.strokeRect(bannerX, bannerY, bannerW, bannerH);
 
-    // Cột 1 Banner: Avatar Căn Giữa Chuẩn Tỉ Lệ & Thông tin nhân vật
-    const avBoxX = bannerX + 18;
-    const avBoxSize = 78;
+    // Avatar Nhân Vật
+    const avBoxX = bannerX + 14;
+    const avBoxSize = 58;
     const avBoxY = bannerY + Math.round((bannerH - avBoxSize) / 2);
-    this.ctx.fillStyle = 'rgba(10, 5, 20, 0.7)';
+    this.ctx.fillStyle = 'rgba(10, 5, 20, 0.8)';
     this.ctx.fillRect(avBoxX, avBoxY, avBoxSize, avBoxSize);
     this.ctx.strokeStyle = '#fbbf24';
-    this.ctx.lineWidth = 1.5;
+    this.ctx.lineWidth = 1.2;
     this.ctx.strokeRect(avBoxX, avBoxY, avBoxSize, avBoxSize);
 
     const cImg = getIconImage(selectedCharConfig.sprite);
     if (cImg && cImg.complete) {
-      const maxDrawW = avBoxSize - 14;
-      const maxDrawH = avBoxSize - 14;
+      const maxDrawW = avBoxSize - 10;
+      const maxDrawH = avBoxSize - 10;
       let sW = cImg.naturalWidth || 48;
       let sH = cImg.naturalHeight || 96;
       if (selectedCharConfig.spriteSheet) {
@@ -4730,31 +4805,26 @@ class Game {
       }
     }
 
-    const infoTextX = avBoxX + avBoxSize + 20;
+    const infoTextX = avBoxX + avBoxSize + 16;
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffea79';
-    this.ctx.font = 'bold 21px "Segoe UI", sans-serif';
-    this.ctx.fillText(selectedCharConfig.name, infoTextX, bannerY + 34);
-
-    this.ctx.fillStyle = '#c084fc';
-    this.ctx.font = 'italic 14px "Segoe UI", sans-serif';
-    this.ctx.fillText(selectedCharConfig.title, infoTextX, bannerY + 56);
+    this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
+    this.ctx.fillText(selectedCharConfig.name, infoTextX, bannerY + 28);
 
     this.ctx.fillStyle = '#f59e0b';
-    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
-    this.ctx.fillText(`⭐ THÔNG THẠO: CẤP ${charMastery.level} / 100`, infoTextX, bannerY + 82);
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.fillText(`THÔNG THẠO: CẤP ${charMastery.level} / 100`, infoTextX, bannerY + 54);
 
-    // Cột 2 Banner: Thanh tiến trình Score & Nút Nâng Cấp (Căn chuẩn hàng ngang Y: bannerY + 36, H: 42)
-    const progX = bannerX + 415;
-    const progY = bannerY + 36;
-    const progW = 280;
-    const progH = 42;
+    // Thanh Tiến Trình Score & Các Nút Nâng Cấp
+    const progX = bannerX + 370;
+    const progY = bannerY + 22;
+    const progW = 270;
+    const progH = 36;
 
-    this.ctx.fillStyle = '#e2e8f0';
-    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
-    this.ctx.fillText(`Điểm Score Tích Lũy: ${charMastery.score.toLocaleString()} Score`, progX, bannerY + 26);
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '12px "Segoe UI", sans-serif';
+    this.ctx.fillText(`Score Tích Lũy: ${charMastery.score.toLocaleString()} Score`, progX, bannerY + 16);
 
-    // Thanh đo
     this.ctx.fillStyle = 'rgba(10, 8, 20, 0.9)';
     this.ctx.fillRect(progX, progY, progW, progH);
     const scoreRatio = isMaxMastery ? 1.0 : Math.min(1.0, charMastery.score / neededScore);
@@ -4764,353 +4834,677 @@ class Game {
     this.ctx.fillStyle = barGrad;
     this.ctx.fillRect(progX, progY, progW * scoreRatio, progH);
     this.ctx.strokeStyle = '#fbbf24';
-    this.ctx.lineWidth = 1.2;
+    this.ctx.lineWidth = 1.0;
     this.ctx.strokeRect(progX, progY, progW, progH);
 
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 12px monospace';
+    this.ctx.font = 'bold 11px monospace';
     this.ctx.textAlign = 'center';
     this.ctx.fillText(
       isMaxMastery ? 'MAX CẤP (100/100)' : `${charMastery.score.toLocaleString()} / ${neededScore.toLocaleString()} (${Math.floor(scoreRatio * 100)}%)`,
       progX + progW / 2,
-      progY + 26
+      progY + 23
     );
 
     // Nút Nâng 1 Cấp
-    const upBtnW = 135;
-    const upBtnH = 42;
+    const upBtnW = 125;
+    const upBtnH = 36;
     const upBtnX = progX + progW + 12;
-    const upBtnY = bannerY + 36;
+    const upBtnY = progY;
     this.ctx.fillStyle = canLevelUp ? '#15803d' : '#1e293b';
     this.ctx.fillRect(upBtnX, upBtnY, upBtnW, upBtnH);
     this.ctx.strokeStyle = canLevelUp ? '#4ade80' : '#475569';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 1.5;
     this.ctx.strokeRect(upBtnX, upBtnY, upBtnW, upBtnH);
-    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
-    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(isMaxMastery ? 'ĐÃ ĐẠT MAX' : '⬆️ NÂNG 1 CẤP', upBtnX + upBtnW / 2, upBtnY + 26);
+    this.ctx.fillText(isMaxMastery ? 'ĐÃ MAX' : '⬆️ NÂNG 1 CẤP', upBtnX + upBtnW / 2, upBtnY + 23);
     this.menuButtons.push({ x: upBtnX, y: upBtnY, w: upBtnW, h: upBtnH, id: 'level_up_mastery' });
 
-    // Nút Nâng Tối Đa
-    const maxBtnW = 125;
-    const maxBtnH = 42;
+    // Nút Nâng Max
+    const maxBtnW = 115;
+    const maxBtnH = 36;
     const maxBtnX = upBtnX + upBtnW + 8;
-    const maxBtnY = bannerY + 36;
+    const maxBtnY = progY;
     this.ctx.fillStyle = canLevelUp ? '#b45309' : '#1e293b';
     this.ctx.fillRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
     this.ctx.strokeStyle = canLevelUp ? '#fde047' : '#475569';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 1.5;
     this.ctx.strokeRect(maxBtnX, maxBtnY, maxBtnW, maxBtnH);
-    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#94a3b8';
-    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.fillStyle = canLevelUp ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('🚀 NÂNG MAX', maxBtnX + maxBtnW / 2, maxBtnY + 26);
+    this.ctx.fillText('🚀 NÂNG MAX', maxBtnX + maxBtnW / 2, maxBtnY + 23);
     this.menuButtons.push({ x: maxBtnX, y: maxBtnY, w: maxBtnW, h: maxBtnH, id: 'level_up_max_mastery' });
 
-    // Nút Nhận Score Test
+    // Nút +10K Score Test
     const testBtnW = 115;
-    const testBtnH = 42;
+    const testBtnH = 36;
     const testBtnX = maxBtnX + maxBtnW + 8;
-    const testBtnY = bannerY + 36;
+    const testBtnY = progY;
     this.ctx.fillStyle = '#4c1d95';
     this.ctx.fillRect(testBtnX, testBtnY, testBtnW, testBtnH);
     this.ctx.strokeStyle = '#a855f7';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 1.5;
     this.ctx.strokeRect(testBtnX, testBtnY, testBtnW, testBtnH);
     this.ctx.fillStyle = '#fde047';
-    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('🎁 +10K SCORE', testBtnX + testBtnW / 2, testBtnY + 26);
+    this.ctx.fillText('🎁 +10K SCORE', testBtnX + testBtnW / 2, testBtnY + 23);
     this.menuButtons.push({ x: testBtnX, y: testBtnY, w: testBtnW, h: testBtnH, id: 'add_test_score' });
 
-    // Cột 3 Banner: Điểm Kỹ Năng & 2 Nút Reset (Cùng hàng Y: bannerY + 36)
-    let allocatedSkillPoints = 0;
-    for (const key of Object.keys(SKILL_TREE_DEFINITIONS)) {
-      allocatedSkillPoints += (charMastery.skills[key] || 0);
-    }
-
-    const skillBoxX = testBtnX + testBtnW + 20;
+    // Điểm Kỹ Năng & Nút Reset Score
+    const pointInfoX = testBtnX + testBtnW + 18;
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#fde047';
-    this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
-    this.ctx.fillText(`🌟 ĐIỂM KỸ NĂNG: ${charMastery.skillPoints}`, skillBoxX, bannerY + 48);
+    this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    this.ctx.fillText(`🌟 ĐIỂM KỸ NĂNG: ${charMastery.skillPoints}`, pointInfoX, bannerY + 32);
 
     this.ctx.fillStyle = '#94a3b8';
-    this.ctx.font = '13px "Segoe UI", sans-serif';
-    this.ctx.fillText(`Đã cộng: ${allocatedSkillPoints} điểm`, skillBoxX, bannerY + 70);
+    this.ctx.font = '12px "Segoe UI", sans-serif';
+    this.ctx.fillText(`Đã dùng: ${totalSpentPoints} / 100 Điểm`, pointInfoX, bannerY + 56);
 
-    // Nút 2: Tẩy Cấp Thông Thạo (Reset về Cấp 1 & Hoàn 100% Score)
     const hasLevel = charMastery.level > 1;
     const resetLvlBtnW = 160;
-    const resetLvlBtnH = 42;
+    const resetLvlBtnH = 36;
     const resetLvlBtnX = bannerX + bannerW - resetLvlBtnW - 14;
-    const resetLvlBtnY = bannerY + 36;
+    const resetLvlBtnY = progY;
     this.ctx.fillStyle = hasLevel ? '#7c2d12' : '#1e293b';
     this.ctx.fillRect(resetLvlBtnX, resetLvlBtnY, resetLvlBtnW, resetLvlBtnH);
     this.ctx.strokeStyle = hasLevel ? '#fb923c' : '#475569';
-    this.ctx.lineWidth = hasLevel ? 2 : 1;
+    this.ctx.lineWidth = hasLevel ? 1.8 : 1.0;
     this.ctx.strokeRect(resetLvlBtnX, resetLvlBtnY, resetLvlBtnW, resetLvlBtnH);
     this.ctx.fillStyle = hasLevel ? '#ffffff' : '#64748b';
-    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('♻️ TẨY CẤP & SCORE', resetLvlBtnX + resetLvlBtnW / 2, resetLvlBtnY + 26);
+    this.ctx.fillText('♻️ TẨY CẤP & SCORE', resetLvlBtnX + resetLvlBtnW / 2, resetLvlBtnY + 23);
     this.menuButtons.push({ x: resetLvlBtnX, y: resetLvlBtnY, w: resetLvlBtnW, h: resetLvlBtnH, id: 'reset_mastery_level' });
 
-    // Nút 1: Tẩy Toàn Bộ Điểm Kỹ Năng (Hoàn Điểm Kỹ Năng)
-    const hasAllocated = allocatedSkillPoints > 0;
-    const resetBtnW = 160;
-    const resetBtnH = 42;
-    const resetBtnX = resetLvlBtnX - resetBtnW - 12;
-    const resetBtnY = bannerY + 36;
-    this.ctx.fillStyle = hasAllocated ? '#831843' : '#1e293b';
-    this.ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-    this.ctx.strokeStyle = hasAllocated ? '#f472b6' : '#475569';
-    this.ctx.lineWidth = hasAllocated ? 2 : 1;
-    this.ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-    this.ctx.fillStyle = hasAllocated ? '#ffffff' : '#64748b';
-    this.ctx.font = 'bold 14px "Nunito", sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('🔄 TẨY KỸ NĂNG', resetBtnX + resetBtnW / 2, resetBtnY + 26);
-    this.menuButtons.push({ x: resetBtnX, y: resetBtnY, w: resetBtnW, h: resetBtnH, id: 'reset_mastery_skills' });
+    // 5. Thanh Tabs Chuyển Đổi 3 Nhánh (Sinh Tồn - Tấn Công - Tiện Ích)
+    const activeTab = this.skillTreeSelectedTab || 'green';
+    const spentGreen = this.masterySystem.getPointsSpentInBranch(selectedCharConfig.id, 'green');
+    const spentRed = this.masterySystem.getPointsSpentInBranch(selectedCharConfig.id, 'red');
+    const spentYellow = this.masterySystem.getPointsSpentInBranch(selectedCharConfig.id, 'yellow');
 
-    // 4. Khu Vực Cây Kỹ Năng 3 Cột (Tấn Công - Sinh Tồn - Tiện Ích & Tinh Hoa)
-    const availableW = this.canvas.width - 100;
-    const colGap = 24;
-    const colW = Math.floor((availableW - colGap * 2) / 3);
-    const colStartY = 272;
-    const colStartX = 50;
+    const branchTabY = 206;
+    const branchTabH = 44;
 
-    const columns = [
+    const branchTabs = [
       {
-        title: '⚔️ NHÁNH TẤN CÔNG (OFFENSE)',
-        color: '#dc2626',
-        borderColor: '#f87171',
-        skills: ['attack_dmg', 'crit_rate', 'crit_dmg', 'cooldown']
+        id: 'green',
+        name: '1. SINH TỒN & PHÒNG THỦ',
+        icon: '🛡️',
+        spent: spentGreen,
+        x: 50,
+        w: 395,
+        activeColor: '#10b981',
+        activeBg: 'rgba(6, 78, 59, 0.95)',
+        textColor: '#6ee7b7'
       },
       {
-        title: '🛡️ NHÁNH SINH TỒN (SURVIVAL)',
-        color: '#16a34a',
-        borderColor: '#4ade80',
-        skills: ['max_health', 'regen', 'armor', 'lifesteal']
+        id: 'red',
+        name: '2. TẤN CÔNG & HỦY DIỆT',
+        icon: '⚔️',
+        spent: spentRed,
+        x: 460,
+        w: 395,
+        activeColor: '#ef4444',
+        activeBg: 'rgba(127, 29, 29, 0.95)',
+        textColor: '#fca5a5'
       },
       {
-        title: '🌟 TIỆN ÍCH & TINH HOA (MASTERY)',
-        color: '#9333ea',
-        borderColor: '#c084fc',
-        skills: ['speed', 'pickup_range', 'greed', 'special']
+        id: 'yellow',
+        name: '3. TIỆN ÍCH & NĂNG LƯỢNG',
+        icon: '⚡',
+        spent: spentYellow,
+        x: 870,
+        w: 395,
+        activeColor: '#f59e0b',
+        activeBg: 'rgba(120, 53, 15, 0.95)',
+        textColor: '#fde68a'
       }
     ];
 
-    const cardH = 152;
-    const cardGap = 16;
+    for (const bTab of branchTabs) {
+      const isActive = (bTab.id === activeTab);
+      this.ctx.fillStyle = isActive ? bTab.activeBg : 'rgba(15, 23, 42, 0.85)';
+      this.ctx.fillRect(bTab.x, branchTabY, bTab.w, branchTabH);
+      this.ctx.strokeStyle = isActive ? bTab.activeColor : '#334155';
+      this.ctx.lineWidth = isActive ? 2.5 : 1.0;
+      this.ctx.strokeRect(bTab.x, branchTabY, bTab.w, branchTabH);
 
-    for (let cIdx = 0; cIdx < columns.length; cIdx++) {
-      const col = columns[cIdx];
-      const colX = colStartX + cIdx * (colW + colGap);
-
-      // Header Nhánh
-      this.ctx.fillStyle = 'rgba(20, 15, 35, 0.9)';
-      this.ctx.fillRect(colX, colStartY, colW, 40);
-      this.ctx.strokeStyle = col.borderColor;
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(colX, colStartY, colW, 40);
-
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+      this.ctx.fillStyle = isActive ? '#ffffff' : '#94a3b8';
+      this.ctx.font = isActive ? 'bold 15px "Segoe UI", sans-serif' : '14px "Segoe UI", sans-serif';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(col.title, colX + colW / 2, colStartY + 26);
+      this.ctx.fillText(`${bTab.icon} ${bTab.name}  [${bTab.spent}đ]`, bTab.x + bTab.w / 2, branchTabY + 28);
 
-      // Vẽ từng Card kỹ năng trong nhánh
-      for (let sIdx = 0; sIdx < col.skills.length; sIdx++) {
-        const skillKey = col.skills[sIdx];
-        const def = SKILL_TREE_DEFINITIONS[skillKey];
-        const curLvl = charMastery.skills[skillKey] || 0;
-        const maxLvl = def.maxLevel;
-        const cardY = colStartY + 50 + sIdx * (cardH + cardGap);
-
-        // Khung Card
-        this.ctx.fillStyle = 'rgba(16, 12, 28, 0.95)';
-        this.ctx.fillRect(colX, cardY, colW, cardH);
-        this.ctx.strokeStyle = (curLvl > 0) ? col.borderColor : '#334155';
-        this.ctx.lineWidth = (curLvl > 0) ? 2 : 1.2;
-        this.ctx.strokeRect(colX, cardY, colW, cardH);
-
-        // Xử lý tên và mô tả đặc biệt nếu là kỹ năng Tinh Hoa Tối Thượng
-        let skillName = def.name;
-        let skillDesc = def.desc;
-        let skillEffectText = def.format(curLvl);
-
-        if (skillKey === 'special') {
-          const spDef = CHARACTER_SPECIAL_MASTERY[selectedCharConfig.id];
-          if (spDef) {
-            skillName = `👑 ${spDef.name}`;
-            skillDesc = spDef.desc;
-            skillEffectText = spDef.format(curLvl);
-          }
-        } else {
-          skillName = `${def.icon} ${def.name}`;
-        }
-
-        // Tên kỹ năng & Cấp độ
-        this.ctx.textAlign = 'left';
-        this.ctx.fillStyle = (curLvl > 0) ? '#fde047' : '#f8fafc';
-        this.ctx.font = 'bold 18px "Segoe UI", sans-serif';
-        this.ctx.fillText(skillName, colX + 18, cardY + 28);
-
-        this.ctx.textAlign = 'right';
-        this.ctx.fillStyle = (curLvl >= maxLvl) ? '#f59e0b' : '#94a3b8';
-        this.ctx.font = 'bold 16px monospace';
-        this.ctx.fillText(`Cấp ${curLvl} / ${maxLvl}`, colX + colW - 130, cardY + 28);
-
-        // 10 Vạch đo cấp độ (Pips)
-        const pipStartX = colX + 18;
-        const pipY = cardY + 38;
-        const pipW = 28;
-        const pipH = 8;
-        const pipGap = 5;
-
-        for (let p = 0; p < maxLvl; p++) {
-          const px = pipStartX + p * (pipW + pipGap);
-          const isFilled = p < curLvl;
-          this.ctx.fillStyle = isFilled ? col.borderColor : 'rgba(50, 40, 70, 0.6)';
-          this.ctx.fillRect(px, pipY, pipW, pipH);
-        }
-
-        // Mô tả chi tiết kỹ năng
-        this.ctx.textAlign = 'left';
-        this.ctx.fillStyle = '#94a3b8';
-        this.ctx.font = '13px sans-serif';
-        // Tự wrap dòng cho mô tả
-        const words = skillDesc.split(' ');
-        let line = '';
-        let descY = cardY + 68;
-        for (const w of words) {
-          const test = line + w + ' ';
-          if (this.ctx.measureText(test).width > colW - 150) {
-            this.ctx.fillText(line, colX + 18, descY);
-            line = w + ' ';
-            descY += 18;
-          } else {
-            line = test;
-          }
-        }
-        this.ctx.fillText(line, colX + 18, descY);
-
-        // Hiệu quả hiện tại
-        this.ctx.fillStyle = (curLvl > 0) ? '#4ade80' : '#64748b';
-        this.ctx.font = 'bold 13px sans-serif';
-        this.ctx.fillText(`⚡ Hiệu quả: ${skillEffectText}`, colX + 18, cardY + cardH - 12);
-
-        // Nút [-] Hoàn Điểm và [+] Nâng Điểm
-        const canAddPoint = (charMastery.skillPoints > 0 && curLvl < maxLvl);
-        const canRefundPoint = (curLvl > 0);
-
-        if (curLvl >= maxLvl) {
-          // Nút [-] hoàn 1 điểm
-          const refBtnW = 44;
-          const refBtnH = 46;
-          const refBtnX = colX + colW - refBtnW - 84 - 14;
-          const refBtnY = cardY + 52;
-          this.ctx.fillStyle = '#7f1d1d';
-          this.ctx.fillRect(refBtnX, refBtnY, refBtnW, refBtnH);
-          this.ctx.strokeStyle = '#f87171';
-          this.ctx.lineWidth = 1.5;
-          this.ctx.strokeRect(refBtnX, refBtnY, refBtnW, refBtnH);
-          this.ctx.fillStyle = '#ffffff';
-          this.ctx.font = 'bold 16px sans-serif';
-          this.ctx.textAlign = 'center';
-          this.ctx.fillText('[-]', refBtnX + refBtnW / 2, refBtnY + 29);
-          this.menuButtons.push({ x: refBtnX, y: refBtnY, w: refBtnW, h: refBtnH, id: 'refund_skill_' + skillKey });
-
-          // Khung ĐÃ MAX
-          const maxBoxW = 78;
-          const maxBoxX = refBtnX + refBtnW + 6;
-          this.ctx.fillStyle = '#1e293b';
-          this.ctx.fillRect(maxBoxX, refBtnY, maxBoxW, refBtnH);
-          this.ctx.strokeStyle = '#475569';
-          this.ctx.lineWidth = 1.5;
-          this.ctx.strokeRect(maxBoxX, refBtnY, maxBoxW, refBtnH);
-          this.ctx.fillStyle = '#f59e0b';
-          this.ctx.font = 'bold 13px sans-serif';
-          this.ctx.textAlign = 'center';
-          this.ctx.fillText('ĐÃ MAX', maxBoxX + maxBoxW / 2, refBtnY + 29);
-          this.menuButtons.push({ x: maxBoxX, y: refBtnY, w: maxBoxW, h: refBtnH, id: 'allocate_skill_' + skillKey });
-        } else if (canRefundPoint) {
-          // Có điểm (> 0): Hiện cả 2 nút [-] và [+]
-          const refBtnW = 44;
-          const refBtnH = 46;
-          const refBtnX = colX + colW - refBtnW - 84 - 14;
-          const refBtnY = cardY + 52;
-          this.ctx.fillStyle = '#7f1d1d';
-          this.ctx.fillRect(refBtnX, refBtnY, refBtnW, refBtnH);
-          this.ctx.strokeStyle = '#f87171';
-          this.ctx.lineWidth = 1.5;
-          this.ctx.strokeRect(refBtnX, refBtnY, refBtnW, refBtnH);
-          this.ctx.fillStyle = '#ffffff';
-          this.ctx.font = 'bold 16px sans-serif';
-          this.ctx.textAlign = 'center';
-          this.ctx.fillText('[-]', refBtnX + refBtnW / 2, refBtnY + 29);
-          this.menuButtons.push({ x: refBtnX, y: refBtnY, w: refBtnW, h: refBtnH, id: 'refund_skill_' + skillKey });
-
-          const addBtnW = 78;
-          const addBtnX = refBtnX + refBtnW + 6;
-          this.ctx.fillStyle = canAddPoint ? '#6d28d9' : '#1e293b';
-          this.ctx.fillRect(addBtnX, refBtnY, addBtnW, refBtnH);
-          this.ctx.strokeStyle = canAddPoint ? '#fbbf24' : '#334155';
-          this.ctx.lineWidth = canAddPoint ? 2 : 1;
-          this.ctx.strokeRect(addBtnX, refBtnY, addBtnW, refBtnH);
-          this.ctx.fillStyle = canAddPoint ? '#ffffff' : '#64748b';
-          this.ctx.font = 'bold 13px sans-serif';
-          this.ctx.textAlign = 'center';
-          this.ctx.fillText('[+] NÂNG', addBtnX + addBtnW / 2, refBtnY + 29);
-          this.menuButtons.push({ x: addBtnX, y: refBtnY, w: addBtnW, h: refBtnH, id: 'allocate_skill_' + skillKey });
-        } else {
-          // Chưa có điểm (cấp 0): Chỉ hiện nút [+] NÂNG
-          const addBtnW = 110;
-          const addBtnH = 46;
-          const addBtnX = colX + colW - addBtnW - 14;
-          const addBtnY = cardY + 52;
-          this.ctx.fillStyle = canAddPoint ? '#6d28d9' : '#1e293b';
-          this.ctx.fillRect(addBtnX, addBtnY, addBtnW, addBtnH);
-          this.ctx.strokeStyle = canAddPoint ? '#fbbf24' : '#334155';
-          this.ctx.lineWidth = canAddPoint ? 2 : 1;
-          this.ctx.strokeRect(addBtnX, addBtnY, addBtnW, addBtnH);
-          this.ctx.fillStyle = canAddPoint ? '#ffffff' : '#64748b';
-          this.ctx.font = 'bold 14px sans-serif';
-          this.ctx.textAlign = 'center';
-          this.ctx.fillText('[+] NÂNG', addBtnX + addBtnW / 2, addBtnY + 29);
-          this.menuButtons.push({ x: addBtnX, y: addBtnY, w: addBtnW, h: addBtnH, id: 'allocate_skill_' + skillKey });
-        }
-      }
+      this.menuButtons.push({ x: bTab.x, y: branchTabY, w: bTab.w, h: branchTabH, id: 'switch_skill_tree_tab_' + bTab.id });
     }
 
-    // 5. Nút Quay Lại Menu Chính
-    const bBtnW = 340;
-    const bBtnH = 52;
-    const bBtnX = this.canvas.width / 2 - bBtnW / 2;
-    const bBtnY = this.canvas.height - 70;
+    // 2 Nút Tẩy Điểm bên phải thanh tab
+    const curBranchSpent = (activeTab === 'green' ? spentGreen : (activeTab === 'red' ? spentRed : spentYellow));
+    const resetBranchBtnW = 270;
+    const resetBranchBtnH = 44;
+    const resetBranchBtnX = 1285;
+    const resetBranchBtnY = branchTabY;
+
+    this.ctx.fillStyle = curBranchSpent > 0 ? 'rgba(146, 64, 14, 0.9)' : '#1e293b';
+    this.ctx.fillRect(resetBranchBtnX, resetBranchBtnY, resetBranchBtnW, resetBranchBtnH);
+    this.ctx.strokeStyle = curBranchSpent > 0 ? '#fde047' : '#475569';
+    this.ctx.lineWidth = curBranchSpent > 0 ? 1.8 : 1.0;
+    this.ctx.strokeRect(resetBranchBtnX, resetBranchBtnY, resetBranchBtnW, resetBranchBtnH);
+    this.ctx.fillStyle = curBranchSpent > 0 ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('↩️ TẨY NHÁNH NÀY', resetBranchBtnX + resetBranchBtnW / 2, resetBranchBtnY + 28);
+    this.menuButtons.push({ x: resetBranchBtnX, y: resetBranchBtnY, w: resetBranchBtnW, h: resetBranchBtnH, id: 'reset_skill_branch_' + activeTab });
+
+    const resetAllBtnW = 295;
+    const resetAllBtnH = 44;
+    const resetAllBtnX = resetBranchBtnX + resetBranchBtnW + 16;
+    const resetAllBtnY = branchTabY;
+
+    this.ctx.fillStyle = totalSpentPoints > 0 ? 'rgba(159, 18, 57, 0.9)' : '#1e293b';
+    this.ctx.fillRect(resetAllBtnX, resetAllBtnY, resetAllBtnW, resetAllBtnH);
+    this.ctx.strokeStyle = totalSpentPoints > 0 ? '#fb7185' : '#475569';
+    this.ctx.lineWidth = totalSpentPoints > 0 ? 1.8 : 1.0;
+    this.ctx.strokeRect(resetAllBtnX, resetAllBtnY, resetAllBtnW, resetAllBtnH);
+    this.ctx.fillStyle = totalSpentPoints > 0 ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('🔄 TẨY TẤT CẢ 100 ĐIỂM', resetAllBtnX + resetAllBtnW / 2, resetAllBtnY + 28);
+    this.menuButtons.push({ x: resetAllBtnX, y: resetAllBtnY, w: resetAllBtnW, h: resetAllBtnH, id: 'reset_mastery_skills' });
+
+    // 6. KHU VỰC CÂY KỸ NĂNG BÊN TRÁI (LEFT PANEL: THE BRANCHING SQUARE TREE)
+    const treePanelX = 50;
+    const treePanelY = 260;
+    const treePanelW = 1215;
+    const treePanelH = 730;
+
+    const tabThemeColors = {
+      green:  { border: '#059669', glow: '#10b981', lineActive: '#10b981', title: 'SINH TỒN & PHÒNG THỦ' },
+      red:    { border: '#dc2626', glow: '#ef4444', lineActive: '#ef4444', title: 'TẤN CÔNG & HỦY DIỆT' },
+      yellow: { border: '#d97706', glow: '#f59e0b', lineActive: '#f59e0b', title: 'TIỆN ÍCH & NĂNG LƯỢNG' }
+    };
+    const currentTheme = tabThemeColors[activeTab] || tabThemeColors.green;
+
+    this.ctx.fillStyle = 'rgba(10, 13, 26, 0.95)';
+    this.ctx.fillRect(treePanelX, treePanelY, treePanelW, treePanelH);
+    this.ctx.strokeStyle = currentTheme.border;
+    this.ctx.lineWidth = 2.0;
+    this.ctx.strokeRect(treePanelX, treePanelY, treePanelW, treePanelH);
+
+    // Tọa độ chuẩn 5 tầng nút hình vuông trên màn hình
+    const SLOT_COORDS = {
+      'slot-tier1':       { cx: 657, cy: 325, w: 90, h: 90, tier: 1 },
+      'slot-tier2-left':  { cx: 470, cy: 460, w: 90, h: 90, tier: 2 },
+      'slot-tier2-right': { cx: 844, cy: 460, w: 90, h: 90, tier: 2 },
+      'slot-tier3-left':  { cx: 285, cy: 595, w: 90, h: 90, tier: 3 },
+      'slot-tier3-mid':   { cx: 657, cy: 595, w: 90, h: 90, tier: 3 },
+      'slot-tier3-right': { cx: 1030, cy: 595, w: 90, h: 90, tier: 3 },
+      'slot-tier4-left':  { cx: 470, cy: 730, w: 90, h: 90, tier: 4 },
+      'slot-tier4-right': { cx: 844, cy: 730, w: 90, h: 90, tier: 4 },
+      'slot-tier5':       { cx: 657, cy: 885, w: 108, h: 108, tier: 5 } // Keystone hình vuông lớn
+    };
+
+    // 6.1. Vẽ đường nối Bezier giữa các nút (Connectors)
+    const links = BRANCH_LINKS[activeTab] || [];
+    for (const [pId, cId] of links) {
+      const pDef = SKILL_TREE_DEFINITIONS[pId];
+      const cDef = SKILL_TREE_DEFINITIONS[cId];
+      if (!pDef || !cDef) continue;
+
+      const pSlot = SLOT_COORDS[pDef.slot];
+      const cSlot = SLOT_COORDS[cDef.slot];
+      if (!pSlot || !cSlot) continue;
+
+      const isParentActive = (charMastery.skills[pId] || 0) > 0;
+      const isChildActive = (charMastery.skills[cId] || 0) > 0;
+      const isChildUnlocked = this.masterySystem.isNodeUnlocked(selectedCharConfig.id, cId);
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(pSlot.cx, pSlot.cy);
+      const midY = (pSlot.cy + cSlot.cy) / 2;
+      this.ctx.bezierCurveTo(pSlot.cx, midY, cSlot.cx, midY, cSlot.cx, cSlot.cy);
+
+      if (isParentActive && (isChildActive || isChildUnlocked)) {
+        this.ctx.strokeStyle = currentTheme.lineActive;
+        this.ctx.lineWidth = 3.5;
+        this.ctx.shadowColor = currentTheme.glow;
+        this.ctx.shadowBlur = 8;
+      } else {
+        this.ctx.strokeStyle = 'rgba(51, 65, 85, 0.65)';
+        this.ctx.lineWidth = 2.0;
+        this.ctx.shadowBlur = 0;
+      }
+      this.ctx.stroke();
+      this.ctx.shadowBlur = 0;
+    }
+
+    // 6.2. Vẽ các nút kỹ năng hình vuông (Square Tech Nodes)
+    const currentBranchNodeKeys = Object.keys(SKILL_TREE_DEFINITIONS).filter(k => SKILL_TREE_DEFINITIONS[k].branch === activeTab);
+    let hoveredNodeCandidate = null;
+
+    for (const nodeId of currentBranchNodeKeys) {
+      const def = SKILL_TREE_DEFINITIONS[nodeId];
+      const slot = SLOT_COORDS[def.slot];
+      if (!slot) continue;
+
+      const nx = slot.cx - slot.w / 2;
+      const ny = slot.cy - slot.h / 2;
+      const nw = slot.w;
+      const nh = slot.h;
+
+      const curLvl = charMastery.skills[nodeId] || 0;
+      const maxLvl = def.maxLevel;
+      const isUnlocked = this.masterySystem.isNodeUnlocked(selectedCharConfig.id, nodeId);
+      const isMax = curLvl >= maxLvl;
+      const isSelected = (nodeId === this.selectedSkillNodeId);
+
+      const isMouseOver = (
+        this.mouseX >= nx && this.mouseX <= nx + nw &&
+        this.mouseY >= ny && this.mouseY <= ny + nh
+      );
+      if (isMouseOver) {
+        hoveredNodeCandidate = def;
+      }
+
+      // Nền & Viền nút hình vuông
+      if (!isUnlocked) {
+        this.ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+        this.ctx.fillRect(nx, ny, nw, nh);
+        this.ctx.strokeStyle = '#334155';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(nx, ny, nw, nh);
+      } else if (curLvl > 0) {
+        this.ctx.fillStyle = isSelected ? 'rgba(30, 27, 75, 0.98)' : 'rgba(17, 24, 39, 0.95)';
+        this.ctx.fillRect(nx, ny, nw, nh);
+        this.ctx.strokeStyle = isSelected ? '#fbbf24' : currentTheme.glow;
+        this.ctx.lineWidth = isSelected ? 3.0 : 2.2;
+        if (isSelected) {
+          this.ctx.shadowColor = currentTheme.glow;
+          this.ctx.shadowBlur = 14;
+        }
+        this.ctx.strokeRect(nx, ny, nw, nh);
+        this.ctx.shadowBlur = 0;
+      } else {
+        this.ctx.fillStyle = isSelected ? 'rgba(30, 27, 75, 0.98)' : 'rgba(15, 23, 42, 0.9)';
+        this.ctx.fillRect(nx, ny, nw, nh);
+        this.ctx.strokeStyle = isSelected ? '#38bdf8' : '#475569';
+        this.ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        this.ctx.strokeRect(nx, ny, nw, nh);
+      }
+
+      // Icon kỹ năng
+      this.ctx.font = def.isKeystone ? '42px sans-serif' : '32px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(def.icon, slot.cx, slot.cy + (def.isKeystone ? 6 : 4));
+
+      // Tên kỹ năng ngắn gọn trên đỉnh nút
+      this.ctx.font = 'bold 10px "Segoe UI", sans-serif';
+      this.ctx.fillStyle = (curLvl > 0 ? '#fde047' : (isUnlocked ? '#e2e8f0' : '#64748b'));
+      const displayName = def.name.length > 13 ? def.name.slice(0, 12) + '…' : def.name;
+      this.ctx.fillText(displayName, slot.cx, ny + 14);
+
+      // Thẻ Giá Điểm góc trên bên phải
+      this.ctx.font = 'bold 10px monospace';
+      this.ctx.fillStyle = isUnlocked ? '#fbbf24' : '#64748b';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`${def.costPerLevel}đ`, nx + nw - 5, ny + 13);
+
+      // Thẻ Cấp Độ ở góc dưới
+      this.ctx.textAlign = 'center';
+      if (isMax) {
+        this.ctx.fillStyle = '#f59e0b';
+        this.ctx.font = 'bold 11px monospace';
+        this.ctx.fillText('⭐ MAX', slot.cx, ny + nh - 8);
+      } else {
+        this.ctx.fillStyle = curLvl > 0 ? '#4ade80' : (isUnlocked ? '#94a3b8' : '#475569');
+        this.ctx.font = 'bold 11px monospace';
+        this.ctx.fillText(`${curLvl}/${maxLvl}`, slot.cx, ny + nh - 8);
+      }
+
+      // Biểu tượng Khóa nếu chưa đủ điều kiện
+      if (!isUnlocked) {
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        this.ctx.fillRect(nx, ny, nw, nh);
+        this.ctx.font = '24px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('🔒', slot.cx, slot.cy + 8);
+      }
+
+      // Nút [-] và [+] nhỏ tiện dụng trực tiếp trên thẻ
+      if (isUnlocked) {
+        if (curLvl > 0) {
+          const mBtnW = 22;
+          const mBtnH = 22;
+          const mBtnX = nx + 4;
+          const mBtnY = ny + nh - mBtnH - 4;
+          this.ctx.fillStyle = '#7f1d1d';
+          this.ctx.fillRect(mBtnX, mBtnY, mBtnW, mBtnH);
+          this.ctx.strokeStyle = '#f87171';
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(mBtnX, mBtnY, mBtnW, mBtnH);
+          this.ctx.fillStyle = '#ffffff';
+          this.ctx.font = 'bold 13px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText('-', mBtnX + mBtnW / 2, mBtnY + 15);
+          this.menuButtons.push({ x: mBtnX, y: mBtnY, w: mBtnW, h: mBtnH, id: 'refund_skill_' + nodeId });
+        }
+
+        if (!isMax) {
+          const pBtnW = 22;
+          const pBtnH = 22;
+          const pBtnX = nx + nw - pBtnW - 4;
+          const pBtnY = ny + nh - pBtnH - 4;
+          const canAdd = charMastery.skillPoints >= def.costPerLevel;
+          this.ctx.fillStyle = canAdd ? '#15803d' : '#1e293b';
+          this.ctx.fillRect(pBtnX, pBtnY, pBtnW, pBtnH);
+          this.ctx.strokeStyle = canAdd ? '#4ade80' : '#475569';
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(pBtnX, pBtnY, pBtnW, pBtnH);
+          this.ctx.fillStyle = canAdd ? '#ffffff' : '#64748b';
+          this.ctx.font = 'bold 13px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText('+', pBtnX + pBtnW / 2, pBtnY + 15);
+          this.menuButtons.push({ x: pBtnX, y: pBtnY, w: pBtnW, h: pBtnH, id: 'allocate_skill_' + nodeId });
+        }
+      }
+
+      // Click vào thân nút hình vuông -> Chọn nút để soi chi tiết
+      this.menuButtons.push({ x: nx, y: ny, w: nw, h: nh, id: 'select_skill_node_' + nodeId });
+    }
+
+    // 7. KHU VỰC BÊN PHẢI (RIGHT PANEL: INSPECTOR & REAL LIVE ENGINE STATS)
+    const rightPanelX = 1285;
+    const rightPanelY = 260;
+    const rightPanelW = 585;
+    const rightPanelH = 730;
+
+    // 7.1. Bảng Soi Chi Tiết Nút Kỹ Năng Đang Chọn (Inspector Box)
+    const inspectDef = hoveredNodeCandidate || SKILL_TREE_DEFINITIONS[this.selectedSkillNodeId] || SKILL_TREE_DEFINITIONS['s1'];
+    const curInspectLvl = charMastery.skills[inspectDef.id] || 0;
+    const isInspectUnlocked = this.masterySystem.isNodeUnlocked(selectedCharConfig.id, inspectDef.id);
+    const canSafelyRefundInspect = this.masterySystem.canSafelyRefund(selectedCharConfig.id, inspectDef.id);
+    const canAddInspect = isInspectUnlocked && curInspectLvl < inspectDef.maxLevel && charMastery.skillPoints >= inspectDef.costPerLevel;
+
+    const insBoxY = rightPanelY;
+    const insBoxH = 340;
+
+    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+    this.ctx.fillRect(rightPanelX, insBoxY, rightPanelW, insBoxH);
+    this.ctx.strokeStyle = currentTheme.border;
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(rightPanelX, insBoxY, rightPanelW, insBoxH);
+
+    // Icon to trong khung
+    const iIconSize = 58;
+    const iIconX = rightPanelX + 16;
+    const iIconY = insBoxY + 16;
+    this.ctx.fillStyle = 'rgba(30, 41, 59, 0.9)';
+    this.ctx.fillRect(iIconX, iIconY, iIconSize, iIconSize);
+    this.ctx.strokeStyle = currentTheme.glow;
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(iIconX, iIconY, iIconSize, iIconSize);
+
+    this.ctx.font = '36px sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(inspectDef.icon, iIconX + iIconSize / 2, iIconY + 42);
+
+    // Tên kỹ năng & Phân loại
+    const iTextX = iIconX + iIconSize + 16;
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    this.ctx.fillText(inspectDef.name, iTextX, insBoxY + 36);
+
+    this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
+    this.ctx.fillStyle = inspectDef.isKeystone ? '#f59e0b' : currentTheme.textColor;
+    const tierText = inspectDef.isKeystone ? '👑 KEYSTONE TỐI THƯỢNG (TIER 5)' : `BẬC ${inspectDef.tier} (${inspectDef.costPerLevel} Điểm / Cấp)`;
+    this.ctx.fillText(tierText, iTextX, insBoxY + 58);
+
+    // Cấp độ hiện tại & Yêu cầu mở khóa
+    this.ctx.textAlign = 'right';
+    this.ctx.fillStyle = curInspectLvl >= inspectDef.maxLevel ? '#f59e0b' : '#38bdf8';
+    this.ctx.font = 'bold 16px monospace';
+    this.ctx.fillText(`CẤP ${curInspectLvl} / ${inspectDef.maxLevel}`, rightPanelX + rightPanelW - 16, insBoxY + 36);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.font = '12px "Segoe UI", sans-serif';
+    if (!inspectDef.req) {
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.fillText('🟢 Kỹ Năng Khởi Đầu (Luôn mở khóa)', iTextX, insBoxY + 76);
+    } else if (isInspectUnlocked) {
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.fillText('✅ Đã thỏa mãn điều kiện mở khóa', iTextX, insBoxY + 76);
+    } else {
+      this.ctx.fillStyle = '#f43f5e';
+      const reqNames = Array.isArray(inspectDef.req)
+        ? inspectDef.req.map(rId => SKILL_TREE_DEFINITIONS[rId] ? SKILL_TREE_DEFINITIONS[rId].name : rId).join(' hoặc ')
+        : (SKILL_TREE_DEFINITIONS[inspectDef.req] ? SKILL_TREE_DEFINITIONS[inspectDef.req].name : inspectDef.req);
+      this.ctx.fillText(`🔒 Yêu cầu nâng tầng trước: ${reqNames}`, iTextX, insBoxY + 76);
+    }
+
+    // Mô tả chi tiết kỹ năng
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '13px "Segoe UI", sans-serif';
+    const descWords = inspectDef.desc.split(' ');
+    let dLine = '';
+    let dY = insBoxY + 110;
+    for (const w of descWords) {
+      const test = dLine + w + ' ';
+      if (this.ctx.measureText(test).width > rightPanelW - 36) {
+        this.ctx.fillText(dLine, rightPanelX + 18, dY);
+        dLine = w + ' ';
+        dY += 20;
+      } else {
+        dLine = test;
+      }
+    }
+    this.ctx.fillText(dLine, rightPanelX + 18, dY);
+
+    // Hiệu quả cấp hiện tại & Cấp kế tiếp
+    const effY = insBoxY + 200;
+    this.ctx.fillStyle = curInspectLvl > 0 ? '#4ade80' : '#64748b';
+    this.ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    this.ctx.fillText(`⚡ Cấp Hiện Tại: ${inspectDef.format(curInspectLvl)}`, rightPanelX + 18, effY);
+
+    if (curInspectLvl < inspectDef.maxLevel) {
+      this.ctx.fillStyle = '#38bdf8';
+      this.ctx.fillText(`⏩ Cấp Kế Tiếp: ${inspectDef.format(curInspectLvl + 1)}`, rightPanelX + 18, effY + 24);
+    } else {
+      this.ctx.fillStyle = '#f59e0b';
+      this.ctx.fillText('⭐ Đã đạt cấp độ tối đa!', rightPanelX + 18, effY + 24);
+    }
+
+    // 2 Nút Hành Động Lớn trong Inspector: [-] Hoàn Điểm và [+] Nâng Cấp
+    const actBtnW = 265;
+    const actBtnH = 46;
+    const actBtnY = insBoxY + 276;
+
+    // Nút [-] HOÀN ĐIỂM
+    const refBtnX = rightPanelX + 18;
+    this.ctx.fillStyle = (curInspectLvl > 0 && canSafelyRefundInspect) ? '#831843' : '#1e293b';
+    this.ctx.fillRect(refBtnX, actBtnY, actBtnW, actBtnH);
+    this.ctx.strokeStyle = (curInspectLvl > 0 && canSafelyRefundInspect) ? '#f472b6' : '#475569';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeRect(refBtnX, actBtnY, actBtnW, actBtnH);
+    this.ctx.fillStyle = (curInspectLvl > 0 && canSafelyRefundInspect) ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(`[-] HOÀN ĐIỂM (-${inspectDef.costPerLevel}đ)`, refBtnX + actBtnW / 2, actBtnY + 28);
+    this.menuButtons.push({ x: refBtnX, y: actBtnY, w: actBtnW, h: actBtnH, id: 'refund_skill_' + inspectDef.id });
+
+    // Nút [+] NÂNG CẤP
+    const addBtnX = refBtnX + actBtnW + 18;
+    this.ctx.fillStyle = canAddInspect ? '#15803d' : '#1e293b';
+    this.ctx.fillRect(addBtnX, actBtnY, actBtnW, actBtnH);
+    this.ctx.strokeStyle = canAddInspect ? '#4ade80' : '#475569';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(addBtnX, actBtnY, actBtnW, actBtnH);
+    this.ctx.fillStyle = canAddInspect ? '#ffffff' : '#64748b';
+    this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(
+      curInspectLvl >= inspectDef.maxLevel ? 'ĐÃ MAX CẤP' : `[+] NÂNG CẤP (+${inspectDef.costPerLevel}đ)`,
+      addBtnX + actBtnW / 2,
+      actBtnY + 28
+    );
+    this.menuButtons.push({ x: addBtnX, y: actBtnY, w: actBtnW, h: actBtnH, id: 'allocate_skill_' + inspectDef.id });
+
+    // 7.2. Bảng Chỉ Số Thực Nhận Trong Trận (Real-time Live Engine Stats)
+    const statsBoxY = insBoxY + insBoxH + 15;
+    const statsBoxH = rightPanelH - insBoxH - 15;
+
+    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+    this.ctx.fillRect(rightPanelX, statsBoxY, rightPanelW, statsBoxH);
+    this.ctx.strokeStyle = '#334155';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.strokeRect(rightPanelX, statsBoxY, rightPanelW, statsBoxH);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 15px "Segoe UI", sans-serif';
+    this.ctx.fillText('📊 CHỈ SỐ THỰC TẾ TRONG TRẬN (REAL-TIME STATS)', rightPanelX + 18, statsBoxY + 26);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = 'italic 11px sans-serif';
+    this.ctx.fillText(`*Tương ứng 100% thuộc tính engine game cho ${selectedCharConfig.name}:`, rightPanelX + 18, statsBoxY + 44);
+
+    const bonuses = this.masterySystem.getBonusStats(selectedCharConfig.id);
+
+    // Lưới 2 cột chỉ số
+    const statColW = (rightPanelW - 46) / 2;
+    const col1X = rightPanelX + 16;
+    const col2X = col1X + statColW + 14;
+    const statStartY = statsBoxY + 70;
+    const statLineH = 26;
+
+    const statsCol1 = [
+      { icon: '❤️', label: 'Máu Tối Đa', val: `+${bonuses.bonusHealth} HP`, active: bonuses.bonusHealth > 0 },
+      { icon: '🛡️', label: 'Giáp Cứng', val: `+${bonuses.bonusArmor}`, active: bonuses.bonusArmor > 0 },
+      { icon: '👟', label: 'Tốc Độ Chạy', val: `+${((bonuses.bonusSpeedMult - 1.0) * 100).toFixed(1)}%`, active: bonuses.bonusSpeedMult > 1.0 },
+      { icon: '💨', label: 'Né Tránh', val: `+${(bonuses.bonusDodge * 100).toFixed(1)}%`, active: bonuses.bonusDodge > 0 },
+      { icon: '🌿', label: 'Hồi Máu', val: `+${bonuses.bonusRegen.toFixed(0)} HP/s`, active: bonuses.bonusRegen > 0 },
+      { icon: '🔰', label: 'Giảm Sát Thương', val: `+${(bonuses.damageReduction * 100).toFixed(1)}%`, active: bonuses.damageReduction > 0 },
+      { icon: '🩸', label: 'Hút Máu', val: `+${(bonuses.lifesteal * 100).toFixed(1)}%`, active: bonuses.lifesteal > 0 },
+      { icon: '🦔', label: 'Phản Đòn', val: `+${bonuses.bonusReflectFlat}`, active: bonuses.bonusReflectFlat > 0 }
+    ];
+
+    const statsCol2 = [
+      { icon: '⚔️', label: 'Sát Thương Toàn Bộ', val: `+${(bonuses.bonusDamageMult * 100).toFixed(0)}%`, active: bonuses.bonusDamageMult > 0 },
+      { icon: '🎯', label: 'Tỉ Lệ Chí Mạng', val: `+${(bonuses.bonusCritChance * 100).toFixed(1)}%`, active: bonuses.bonusCritChance > 0 },
+      { icon: '💥', label: 'ST Chí Mạng', val: `+${(bonuses.bonusCritDamage * 100).toFixed(0)}%`, active: bonuses.bonusCritDamage > 0 },
+      { icon: '🗡️', label: 'Xuyên Giáp', val: `+${bonuses.armorPenFlat}`, active: bonuses.armorPenFlat > 0 },
+      { icon: '🏹', label: 'Phá Giáp Quái', val: `+${(bonuses.armorPenPercent * 100).toFixed(0)}%`, active: bonuses.armorPenPercent > 0 },
+      { icon: '⚡', label: 'Giảm Hồi Chiêu', val: `-${(bonuses.cooldownReduction * 100).toFixed(0)}%`, active: bonuses.cooldownReduction > 0 },
+      { icon: '🧲', label: 'Bán Kính Hút', val: `+${bonuses.bonusPickupRange}px`, active: bonuses.bonusPickupRange > 0 },
+      { icon: '🪙', label: 'Thưởng Vàng / EXP', val: `+${((bonuses.bonusGoldMult - 1) * 100).toFixed(0)}% / +${((bonuses.bonusExpMult - 1) * 100).toFixed(1)}%`, active: bonuses.bonusGoldMult > 1.0 }
+    ];
+
+    for (let sIdx = 0; sIdx < statsCol1.length; sIdx++) {
+      const s1 = statsCol1[sIdx];
+      const sy = statStartY + sIdx * statLineH;
+
+      this.ctx.fillStyle = s1.active ? '#e2e8f0' : '#64748b';
+      this.ctx.font = '12px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(`${s1.icon} ${s1.label}`, col1X, sy);
+
+      this.ctx.textAlign = 'right';
+      this.ctx.fillStyle = s1.active ? '#4ade80' : '#475569';
+      this.ctx.font = 'bold 12px monospace';
+      this.ctx.fillText(s1.val, col1X + statColW, sy);
+
+      const s2 = statsCol2[sIdx];
+      this.ctx.fillStyle = s2.active ? '#e2e8f0' : '#64748b';
+      this.ctx.font = '12px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(`${s2.icon} ${s2.label}`, col2X, sy);
+
+      this.ctx.textAlign = 'right';
+      this.ctx.fillStyle = s2.active ? '#fde047' : '#475569';
+      this.ctx.font = 'bold 12px monospace';
+      this.ctx.fillText(s2.val, col2X + statColW, sy);
+    }
+
+    // Keystone Trạng Thái ở đáy bảng chỉ số
+    const ksY = statsBoxY + statsBoxH - 65;
+    this.ctx.fillStyle = 'rgba(2, 6, 23, 0.9)';
+    this.ctx.fillRect(rightPanelX + 12, ksY, rightPanelW - 24, 52);
+    this.ctx.strokeStyle = '#4338ca';
+    this.ctx.lineWidth = 1.0;
+    this.ctx.strokeRect(rightPanelX + 12, ksY, rightPanelW - 24, 52);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.font = 'bold 12px "Segoe UI", sans-serif';
+    if (bonuses.hasPhoenixRevive) {
+      this.ctx.fillStyle = '#4ade80';
+      this.ctx.fillText('👑 BẤT TỬ NIẾT BÀN: SẴN SÀNG (1 LẦN DUY NHẤT / TRẬN)', rightPanelX + 22, ksY + 22);
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '11px sans-serif';
+      this.ctx.fillText('Khi tử trận: Hồi 50% HP + Bất tử 3.0s + Sóng đẩy lùi quái.', rightPanelX + 22, ksY + 40);
+    } else if (bonuses.hasDiệtThếCrit) {
+      this.ctx.fillStyle = '#f87171';
+      this.ctx.fillText('💀 DIỆT THẾ BẠO KÍCH: KÍCH HOẠT (CHÍ MẠNG BẬC 2)', rightPanelX + 22, ksY + 22);
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '11px sans-serif';
+      this.ctx.fillText('10% Crit nhân x2.5 sát thương và phóng sóng xung kích chém quét.', rightPanelX + 22, ksY + 40);
+    } else if (bonuses.hasTimeFreezeKeystone) {
+      this.ctx.fillStyle = '#fde047';
+      this.ctx.fillText('⏳ THỜI KHÔNG NGƯNG ĐỌNG: KÍCH HOẠT', rightPanelX + 22, ksY + 22);
+      this.ctx.fillStyle = '#94a3b8';
+      this.ctx.font = '11px sans-serif';
+      this.ctx.fillText('Bấm [G] hoặc máu < 25%: Ngưng đọng quái vật trong 2.0s.', rightPanelX + 22, ksY + 40);
+    } else {
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.fillText('👑 KEYSTONE TỐI THƯỢNG: CHƯA KÍCH HOẠT', rightPanelX + 22, ksY + 22);
+      this.ctx.font = '11px sans-serif';
+      this.ctx.fillText('Nâng đến Tầng 5 ở đáy nhánh để mở khóa hiệu ứng đặc biệt đỉnh cao.', rightPanelX + 22, ksY + 40);
+    }
+
+    // 8. THANH DƯỚI CÙNG: NÚT QUAY LẠI MENU CHÍNH & HƯỚNG DẪN
+    const bBtnW = 320;
+    const bBtnH = 50;
+    const bBtnX = 50;
+    const bBtnY = 1008;
 
     this.ctx.fillStyle = '#1e1b2e';
     this.ctx.fillRect(bBtnX, bBtnY, bBtnW, bBtnH);
     this.ctx.strokeStyle = '#94a3b8';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 1.8;
     this.ctx.strokeRect(bBtnX, bBtnY, bBtnW, bBtnH);
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 18px sans-serif';
+    this.ctx.font = 'bold 16px sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', bBtnX + bBtnW / 2, bBtnY + 33);
+    this.ctx.fillText('⬅ QUAY VỀ MENU CHÍNH', bBtnX + bBtnW / 2, bBtnY + 31);
     this.menuButtons.push({ x: bBtnX, y: bBtnY, w: bBtnW, h: bBtnH, id: 'back_from_skill_tree' });
 
-    // 6. Toast Notification nổi bật trên màn hình khi thao tác
+    const tipBoxX = bBtnX + bBtnW + 20;
+    const tipBoxW = this.canvas.width - tipBoxX - 50;
+    const tipBoxH = bBtnH;
+
+    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    this.ctx.fillRect(tipBoxX, bBtnY, tipBoxW, tipBoxH);
+    this.ctx.strokeStyle = '#334155';
+    this.ctx.lineWidth = 1.2;
+    this.ctx.strokeRect(tipBoxX, bBtnY, tipBoxW, tipBoxH);
+
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#cbd5e1';
+    this.ctx.font = '13px "Segoe UI", sans-serif';
+    this.ctx.fillText('💡 MẸO: Click trực tiếp vào ô vuông để Soi & Nâng Cấp • Chuột phải hoặc bấm [-] để Hoàn Trả điểm • Mở tầng trên để mở tầng dưới • Max 100 Điểm.', tipBoxX + 18, bBtnY + 30);
+
+    // 9. Toast Thông Báo Thao Tác
     if (this.skillTreeToast && this.skillTreeToast.timer > 0) {
       this.ctx.save();
       const toastAlpha = Math.min(1.0, this.skillTreeToast.timer * 2.5);
       this.ctx.globalAlpha = toastAlpha;
-      const tw = 720;
+      const tw = 760;
       const th = 46;
       const tx = (this.canvas.width - tw) / 2;
-      const ty = 28;
+      const ty = 24;
 
       this.ctx.fillStyle = 'rgba(12, 9, 26, 0.96)';
       this.ctx.fillRect(tx, ty, tw, th);
@@ -5121,7 +5515,7 @@ class Game {
       this.ctx.shadowColor = this.skillTreeToast.color;
       this.ctx.shadowBlur = 14;
       this.ctx.fillStyle = this.skillTreeToast.color;
-      this.ctx.font = 'bold 17px "Segoe UI", sans-serif';
+      this.ctx.font = 'bold 16px "Segoe UI", sans-serif';
       this.ctx.textAlign = 'center';
       this.ctx.fillText(this.skillTreeToast.text, tx + tw / 2, ty + 29);
       this.ctx.restore();

@@ -628,20 +628,57 @@ export class PoolZoneWeapon {
     if (this.timer <= 0) {
       this.timer = this.cooldown;
 
-      // Ném ra các zone gần quái
+      // Thu thập các quái vật còn sống trong tầm nhìn chiến đấu (tối đa 650px quanh người chơi)
+      const nearbyEnemies = [];
+      for (const e of enemies) {
+        if (e.isDead) continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        if (d <= 650) {
+          nearbyEnemies.push({ enemy: e, dist: d });
+        }
+      }
+
+      // Ưu tiên quái vật ở gần người chơi nhất
+      nearbyEnemies.sort((a, b) => a.dist - b.dist);
+
       const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+      const effectiveRadius = this.radius * areaMult;
+
       for (let i = 0; i < this.poolCount; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * 220 + 80;
+        let spawnX, spawnY;
+
+        if (nearbyEnemies.length > 0) {
+          // Nhắm thông minh vào kẻ địch (nhiều vũng sẽ chia đều cho các quái khác nhau)
+          const targetIndex = i < nearbyEnemies.length ? i : Math.floor(Math.random() * nearbyEnemies.length);
+          const target = nearbyEnemies[targetIndex].enemy;
+
+          // Hơi đón đầu nhẹ (15-20px) theo hướng quái đang lao về phía người chơi để quái bước trọn vào vũng
+          const toPlayerAngle = Math.atan2(player.y - target.y, player.x - target.x);
+          const leadDist = Math.min(20, nearbyEnemies[targetIndex].dist * 0.15);
+
+          spawnX = target.x + Math.cos(toPlayerAngle) * leadDist;
+          spawnY = target.y + Math.sin(toPlayerAngle) * leadDist;
+        } else {
+          // Nếu không có quái xung quanh: ném quanh người chơi
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * 180 + 70;
+          spawnX = player.x + Math.cos(angle) * dist;
+          spawnY = player.y + Math.sin(angle) * dist;
+        }
+
         this.activePools.push({
-          x: player.x + Math.cos(angle) * dist,
-          y: player.y + Math.sin(angle) * dist,
-          radius: this.radius * areaMult,
+          x: spawnX,
+          y: spawnY,
+          radius: effectiveRadius,
           damage: this.damage * dmgMult,
           duration: this.duration,
-          tickTimer: 0.35,
+          tickTimer: 0.05, // Kích hoạt nhịp sát thương đầu tiên gần như ngay lập tức khi vũng vừa xuất hiện
           life: this.duration
         });
+
+        if (particles && particles.createHitSparks) {
+          particles.createHitSparks(spawnX, spawnY, 4);
+        }
       }
     }
 

@@ -52,12 +52,26 @@ export class Player {
     const metaDR = (metaBonuses && metaBonuses.damageReduction) ? metaBonuses.damageReduction : 0;
     this.damageReduction = Math.min(0.50, (this.masteryBonuses.damageReduction || 0) + metaDR);
 
-    // Chính Xác & Né Tránh
-    this.accuracy = char.accuracy || CONFIG.PLAYER.BASE_ACCURACY || 1.0;
-    this.dodge = char.dodgeRate || CONFIG.PLAYER.BASE_DODGE || 0.05;
-    // Xuyên Giáp
-    this.armorPenFlat = 0;
-    this.armorPenPercent = 0;
+    // Chính Xác & Né Tránh (bổ trợ từ Thông Thạo Mastery)
+    this.accuracy = (char.accuracy || CONFIG.PLAYER.BASE_ACCURACY || 1.0) + (this.masteryBonuses.accuracyBonus || 0);
+    this.dodge = (char.dodgeRate || CONFIG.PLAYER.BASE_DODGE || 0.05) + (this.masteryBonuses.bonusDodge || 0);
+    this.dodgeHealPercent = this.masteryBonuses.dodgeHealPercent || 0;
+
+    // Xuyên Giáp (bổ trợ từ Thông Thạo Mastery)
+    this.armorPenFlat = this.masteryBonuses.armorPenFlat || 0;
+    this.armorPenPercent = this.masteryBonuses.armorPenPercent || 0;
+    this.masteryAreaMult = 1.0 + (this.masteryBonuses.bonusAreaMult || 0);
+
+    // Keystone Bất Tử Niết Bàn (1 LẦN DUY NHẤT TRONG TRẬN)
+    this.hasPhoenixRevive = !!(this.masteryBonuses && this.masteryBonuses.hasPhoenixRevive);
+    this.phoenixReviveUsed = false;
+
+    // Keystone Diệt Thế Bạo Kích & Kỹ Năng Cuồng Phong
+    this.hasDiệtThếCrit = !!(this.masteryBonuses && this.masteryBonuses.hasDiệtThếCrit);
+    this.critSurgeLevel = this.masteryBonuses.critSurgeLevel || 0;
+    this.critSurgeTimer = 0;
+    this.executeDamageLowHp = this.masteryBonuses.executeDamageLowHp || 0;
+
     // Máu Ảo (Thanh Trắng đè lên thanh Máu đỏ)
     this.shield = 0;
     this.maxShield = this.maxHealth;
@@ -76,13 +90,13 @@ export class Player {
     // --- HỆ THỐNG CHỈ SỐ PHẢN SÁT THƯƠNG (REFLECT DAMAGE / THORNS SYSTEM) ---
     // 1. Phản sát thương cố định (Flat Thorns)
     this.baseReflectFlat = (char.baseReflectFlat || 0);
-    this.masteryReflectFlat = (char.id === 'dark_knight' ? (this.specialMasteryLevel * 250) : 0);
+    this.masteryReflectFlat = (this.masteryBonuses.bonusReflectFlat || 0) + (char.id === 'dark_knight' ? (this.specialMasteryLevel * 150) : 0);
     this.thornsItemLevel = 0;
     this.reflectFlat = this.baseReflectFlat + this.masteryReflectFlat;
 
     // 2. Phản sát thương theo % (Percent Reflect)
     this.baseReflectPercent = (char.baseReflectPercent || 0);
-    this.masteryReflectPercent = (char.id === 'dark_knight' ? (this.specialMasteryLevel * 0.02) : 0);
+    this.masteryReflectPercent = (this.masteryBonuses.bonusReflectPercent || 0);
     this.reflectPercent = this.baseReflectPercent + this.masteryReflectPercent;
 
     // Debuff slow
@@ -174,9 +188,11 @@ export class Player {
     }
   }
 
-  // Lấy hệ số tăng kích thước vũ khí & diện tích quét đòn từ Sách Tri Thức
+  // Lấy hệ số tăng kích thước vũ khí & diện tích quét đòn từ Sách Tri Thức và Cây Kỹ Năng
   getAreaMultiplier() {
-    return (this.bookStats && this.bookStats.areaMult) ? this.bookStats.areaMult : 1.0;
+    const bookArea = (this.bookStats && this.bookStats.areaMult) ? this.bookStats.areaMult : 1.0;
+    const masteryArea = this.masteryAreaMult || 1.0;
+    return bookArea * masteryArea;
   }
 
   // Xử lý hiệu ứng phụ khi đòn đánh vũ khí / đạn trúng quái (VD: Neil Postman 20% thiêu đốt)
@@ -264,11 +280,15 @@ export class Player {
     const armorPenPercent = options.armorPenPercent || 0;
     const attackerEnemy = options.attacker || null;
 
-    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1 - có cộng Né từ Sách)
+    // 1. Kiểm tra Né Tránh vs Chính Xác (Tầng 1 - có cộng Né từ Sách & Thông Thạo)
     const bookDodge = this.bookStats ? (this.bookStats.dodge || 0) : 0;
     const effectiveDodge = Math.min(0.80, this.dodge + bookDodge);
     const hitChance = Math.min(1.0, Math.max(0.05, attackerAcc - effectiveDodge));
     if (Math.random() > hitChance) {
+      // Kỹ năng Thần Tốc Né Đòn: Né thành công hồi phục % Máu
+      if (this.dodgeHealPercent > 0 && !this.noHeal && this.health < this.maxHealth) {
+        this.heal(Math.round(this.maxHealth * this.dodgeHealPercent), particles);
+      }
       if (particles) {
         particles.createDamageNumber(this.x, this.y - 25, 0, false, false, true); // Chữ "NÉ!"
       }
@@ -352,8 +372,22 @@ export class Player {
       }
 
       if (this.health <= 0) {
-        // Kiểm tra Hồi Sinh Macondo từ Gabriel García Márquez (Hồi 100% HP, đóng băng 3s, mưa hoa vàng)
-        if (this.bookSystemRef && this.bookSystemRef.hasBook('marquez') && this.bookSystemRef.marquezCheatDeathCooldown <= 0) {
+        // 1. Kiểm tra Bất Tử Niết Bàn từ Cây Kỹ Năng Thông Thạo (KÍCH HOẠT 1 LẦN DUY NHẤT / TRẬN)
+        if (this.hasPhoenixRevive && !this.phoenixReviveUsed) {
+          this.phoenixReviveUsed = true;
+          this.health = Math.round(this.maxHealth * 0.50);
+          this.invincibilityTimer = 3.0; // Bất tử 3.0 giây
+          if (particles) {
+            particles.createDamageNumber(this.x, this.y - 45, 0, false, false, false, false, '#10b981');
+            particles.createHitSparks(this.x, this.y, 45);
+            particles.createArcaneBlast(this.x, this.y, 3.0);
+          }
+          if (typeof window !== 'undefined' && window.__gameInstance && typeof window.__gameInstance.showGameToast === 'function') {
+            window.__gameInstance.showGameToast('👑 BẤT TỬ NIẾT BÀN: Hồi 50% Máu & Bất Tử 3s! (Đã dùng 1 lần duy nhất)', '#10b981');
+          }
+        }
+        // 2. Kiểm tra Hồi Sinh Macondo từ Gabriel García Márquez (Hồi 100% HP, đóng băng 3s, mưa hoa vàng)
+        else if (this.bookSystemRef && this.bookSystemRef.hasBook('marquez') && this.bookSystemRef.marquezCheatDeathCooldown <= 0) {
           this.bookSystemRef.marquezCheatDeathCooldown = 240.0;
           this.bookSystemRef.marquezCheatDeathActive = 3.0;
           this.health = this.maxHealth;
@@ -366,7 +400,7 @@ export class Player {
             window.__gameInstance.triggerMarquezMacondo(this.x, this.y);
           }
         }
-        // Kiểm tra Hồi Sinh từ Đại Tác Phẩm Hợp Thể (Lacan / Derrida / Marx)
+        // 3. Kiểm tra Hồi Sinh từ Đại Tác Phẩm Hợp Thể (Lacan / Derrida / Marx)
         else if (this.bookSystemRef && this.bookSystemRef.hasExtraLife()) {
           const revivePercent = this.bookSystemRef.consumeExtraLife();
           this.health = Math.max(1, Math.round(this.maxHealth * revivePercent));
@@ -451,6 +485,11 @@ export class Player {
       this.specialSkill.isReady = this.specialSkill.cooldown <= 0;
     }
 
+    // Thời gian tăng tốc Cuồng Phong Đoạt Mệnh khi nổ chí mạng
+    if (this.critSurgeTimer > 0) {
+      this.critSurgeTimer -= delta;
+    }
+
     // Hồi máu liên tục từ Thông Thạo Huyết Mạch Tái Sinh
     if (this.masteryRegen > 0 && !this.noHeal && this.health < this.maxHealth) {
       this.heal(this.masteryRegen * delta);
@@ -476,7 +515,8 @@ export class Player {
     this.isMoving = (move.x !== 0 || move.y !== 0);
 
     const bookSpeedMult = this.bookStats ? (this.bookStats.speedMult || 1.0) : 1.0;
-    const effSpeed = this.speed * this.slowMult * bookSpeedMult;
+    const surgeMult = (this.critSurgeTimer > 0 && this.critSurgeLevel > 0) ? (1.0 + this.critSurgeLevel * 0.05) : 1.0;
+    const effSpeed = this.speed * this.slowMult * bookSpeedMult * surgeMult;
 
     if (this.isMoving) {
       this.x += move.x * effSpeed * delta;
@@ -534,6 +574,17 @@ export class Player {
     if (critTier > 0) {
       // Mỗi tầng Crit nhân dồn theo hệ số sát thương chí mạng
       finalDamage = Math.round(calcDmg * Math.pow(totalCritDamage, critTier));
+
+      // Keystone Diệt Thế Bạo Kích: 10% cơ hội nhân x1.25 thêm vào đòn chí mạng
+      if (this.hasDiệtThếCrit && Math.random() < 0.10) {
+        critTier = Math.max(critTier, 2);
+        finalDamage = Math.round(finalDamage * 1.25);
+      }
+
+      // Kỹ năng Cuồng Phong Đoạt Mệnh: Nổ chí mạng kích hoạt tăng tốc trong 2s
+      if (this.critSurgeLevel > 0) {
+        this.critSurgeTimer = 2.0;
+      }
     } else {
       finalDamage = Math.round(calcDmg);
     }
