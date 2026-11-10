@@ -46,13 +46,13 @@ export const CONFIG = {
     },
     {
       id: 'dark_knight',
-      name: 'Hắc Kiếm Sĩ',
+      name: 'Ema',
       title: 'Hiệp Sĩ Tử Thần',
       desc: 'Máu trâu, phòng thủ cứng cáp. Khởi đầu với Vành Đai Kiếm Khí xoay quanh người.',
-      sprite: 'assets/enemies/dark_knight_walk.png',
-      spriteSheet: { cols: 8, rows: 1 },
-      width: 68,
-      height: 68,
+      sprite: 'character/ema.png',
+      witchSprite: 'character/ema1.png',
+      width: 48,
+      height: 100,
       maxHealth: 1500,
       baseSpeed: 210,
       baseArmor: 40,
@@ -62,17 +62,18 @@ export const CONFIG = {
       dodgeRate: 0.02,
       critChance: 0.03,
       critDamage: 2.0,
-      startingWeaponId: 'orbiting_blades'
+      startingWeaponId: 'orbiting_blades',
+      witchKillRequirement: 100
     },
     {
       id: 'high_mage',
-      name: 'Đại Pháp Sư Rừng Xanh',
+      name: 'Sherry',
       title: 'Bậc Thầy Nguyên Tố',
       desc: 'Bậc thầy ma pháp thiêu đốt diện rộng. Khởi đầu với Hào Quang Thánh Địa.',
-      sprite: 'assets/characters/mage_walk.png',
-      spriteSheet: { cols: 8, rows: 1 },
-      width: 64,
-      height: 64,
+      sprite: 'character/sherry.png',
+      witchSprite: 'character/sherry1.png',
+      width: 48,
+      height: 100,
       maxHealth: 850,
       baseSpeed: 245,
       baseArmor: 0,
@@ -80,7 +81,8 @@ export const CONFIG = {
       dodgeRate: 0.04,
       critChance: 0.08,
       critDamage: 2.2,
-      startingWeaponId: 'holy_aura'
+      startingWeaponId: 'holy_aura',
+      witchKillRequirement: 100
     }
   ],
 
