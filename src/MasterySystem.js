@@ -162,7 +162,7 @@ export const SKILL_TREE_DEFINITIONS = {
   },
   u3: {
     id: 'u3', branch: 'yellow', tier: 2, slot: 'slot-tier2-right',
-    name: 'Bổng Lộc Hoàng Gia', icon: '🪙',
+    name: 'Bổng Lộc Hoàng Gia', icon: '💰',
     costPerLevel: 2, maxLevel: 3, req: 'u1',
     desc: 'Gia tăng tài nguyên nhận được giúp nhanh chóng thăng tiến sức mạnh.',
     format: (lvl) => `+${lvl * 4}% Vàng & +${(lvl * 3.5).toFixed(1)}% Kinh Nghiệm`

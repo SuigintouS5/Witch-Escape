@@ -196,7 +196,7 @@ export class MetaProgression {
         id: 'greed',
         category: 'stats',
         name: 'Thuật Luyện Kim',
-        icon: '🪙',
+        icon: '💰',
         level: 0,
         maxLevel: 10,
         costs: [400, 1000, 2400, 5500, 12000, 20000, 30000, 40000, 50000, 60000],

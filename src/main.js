@@ -3557,7 +3557,7 @@ class Game {
     this.ctx.fillStyle = '#ffd700';
     this.ctx.font = 'bold 30px "Nunito", monospace';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(`🪙 Tiền Vàng: ${this.meta.gold}    |    🏆 Kỷ Lục: ${this.meta.highScore.toLocaleString()}`, this.canvas.width / 2, goldPanelY + 46);
+    this.ctx.fillText(`💰 Tiền Vàng: ${this.meta.gold}    |    🏆 Kỷ Lục: ${this.meta.highScore.toLocaleString()}`, this.canvas.width / 2, goldPanelY + 46);
 
     // Các Nút Menu Chính (Dãn rộng thanh thoát, phông chữ lớn rõ nét)
     const savedInfo = this.getSavedGameInfo();
@@ -3982,7 +3982,7 @@ class Game {
         { icon: '♾️', label: 'Thời Lượng Trận Đấu:', desc: 'KHÔNG GIỚI HẠN thời gian - Sinh tồn tới khi cạn kiệt HP', tag: 'VÔ TẬN', tagColor: '#f97316' },
         { icon: '🔄', label: 'Tới Phút 40:00:', desc: 'Lặp lại toàn bộ chu kỳ Boss Meruru & Yuki đợt 2 với chỉ số x2', tag: 'CHU KỲ 2', tagColor: '#facc15' },
         { icon: '🌊', label: 'Sau Phút 40:00:', desc: 'Biển quái dồn dập tràn ngập toàn bản đồ, mật độ cực hạn', tag: 'BIỂN QUÁI', tagColor: '#60a5fa' },
-        { icon: '🪙', label: 'Cơ Chế Cày Cuốc:', desc: 'Cày bội thu Tiền Vàng & Phá kỷ lục điểm số tối thượng', tag: 'FARM VÀNG', tagColor: '#fbbf24' },
+        { icon: '💰', label: 'Cơ Chế Cày Cuốc:', desc: 'Cày bội thu Tiền Vàng & Phá kỷ lục điểm số tối thượng', tag: 'FARM VÀNG', tagColor: '#fbbf24' },
         { icon: '⚠️', label: 'Cảnh Báo Sinh Tử:', desc: 'Quái vật tăng tiến vô hạn - Thách thức cực đại cho cựu binh!', tag: 'TỬ THẦN', tagColor: '#fb7185' }
       ];
 
@@ -4140,7 +4140,7 @@ class Game {
     this.ctx.font = 'bold 21px "Nunito", monospace';
     this.ctx.textAlign = 'center';
     this.ctx.fillText(
-      `ĐÃ CHỌN: ${checkedCount}/${CONFIG.CHALLENGES.length} Thử Thách    |    ⭐ Thưởng Điểm: +${Math.round(totalScoreBonus * 100)}%    |    🪙 Thưởng Vàng: +${Math.round(totalGoldBonus * 100)}%`,
+      `ĐÃ CHỌN: ${checkedCount}/${CONFIG.CHALLENGES.length} Thử Thách    |    ⭐ Thưởng Điểm: +${Math.round(totalScoreBonus * 100)}%    |    💰 Thưởng Vàng: +${Math.round(totalGoldBonus * 100)}%`,
       this.canvas.width / 2,
       summaryY + 33
     );
@@ -4384,7 +4384,7 @@ class Game {
 
       this.ctx.fillStyle = '#fde047';
       this.ctx.textAlign = 'left';
-      this.ctx.fillText('🪙 Thưởng Tiền Vàng:', rBoxX + 20, rBoxY + 76);
+      this.ctx.fillText('💰 Thưởng Tiền Vàng:', rBoxX + 20, rBoxY + 76);
       this.ctx.textAlign = 'right';
       this.ctx.fillText(goldBonusPct > 0 ? `+${goldBonusPct}% (x${diff.goldMult})` : `+0% (x1.0)`, rBoxX + rBoxW - 20, rBoxY + 76);
 
@@ -4488,7 +4488,7 @@ class Game {
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffd700';
     this.ctx.font = 'bold 28px "Nunito", monospace';
-    this.ctx.fillText(`🪙 Tiền Vàng: ${this.meta.gold.toLocaleString()} Vàng`, headerLeftX, 122);
+    this.ctx.fillText(`💰 Tiền Vàng: ${this.meta.gold.toLocaleString()} Vàng`, headerLeftX, 122);
 
     this.ctx.fillStyle = '#cbd5e1';
     this.ctx.font = 'bold 17px "Nunito", "Be Vietnam Pro", sans-serif';
@@ -4635,7 +4635,7 @@ class Game {
       } else if (isZeroCost) {
         this.ctx.fillText('MIỄN PHÍ (0)', buyBtnX + buyBtnW / 2, buyBtnY + 30);
       } else {
-        this.ctx.fillText(`🪙 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 30);
+        this.ctx.fillText(`💰 ${cost.toLocaleString()}`, buyBtnX + buyBtnW / 2, buyBtnY + 30);
       }
       this.menuButtons.push({ x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH, id: 'buy_upgrade_' + up.id });
 
@@ -5545,7 +5545,7 @@ class Game {
       { icon: '🏹', label: 'Phá Giáp Quái', val: `+${(bonuses.armorPenPercent * 100).toFixed(0)}%`, active: bonuses.armorPenPercent > 0 },
       { icon: '⚡', label: 'Giảm Hồi Chiêu', val: `-${(bonuses.cooldownReduction * 100).toFixed(0)}%`, active: bonuses.cooldownReduction > 0 },
       { icon: '🧲', label: 'Bán Kính Hút', val: `+${bonuses.bonusPickupRange}px`, active: bonuses.bonusPickupRange > 0 },
-      { icon: '🪙', label: 'Thưởng Vàng / EXP', val: `+${((bonuses.bonusGoldMult - 1) * 100).toFixed(0)}% / +${((bonuses.bonusExpMult - 1) * 100).toFixed(1)}%`, active: bonuses.bonusGoldMult > 1.0 }
+      { icon: '💰', label: 'Thưởng Vàng / EXP', val: `+${((bonuses.bonusGoldMult - 1) * 100).toFixed(0)}% / +${((bonuses.bonusExpMult - 1) * 100).toFixed(1)}%`, active: bonuses.bonusGoldMult > 1.0 }
     ];
 
     for (let sIdx = 0; sIdx < statsCol1.length; sIdx++) {
@@ -5789,7 +5789,7 @@ class Game {
     textY += 44;
     this.ctx.textAlign = 'left';
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.fillText(`🪙 VÀNG THU THẬP:`, leftX, textY);
+    this.ctx.fillText(`💰 VÀNG THU THẬP:`, leftX, textY);
     this.ctx.textAlign = 'right';
     this.ctx.fillStyle = '#ffe600';
     this.ctx.fillText(`+${s.goldEarned} Vàng`, rightX, textY);
