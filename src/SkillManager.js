@@ -84,7 +84,7 @@ export class SkillManager {
 
       // Kỹ năng Tinh Hoa Thông Thạo: Thời Không Bất Diệt của Nikaido Hiro
       if (player.charConfig && player.charConfig.id === 'sorceress' && player.specialMasteryLevel > 0) {
-        healPercent += player.specialMasteryLevel * 0.08; // Hồi thêm +8%/cấp
+        healPercent += player.specialMasteryLevel * 0.10; // Hồi thêm +10%/cấp
         invincibility += player.specialMasteryLevel * 0.4; // Thêm +0.4s bất tử/cấp
       }
 

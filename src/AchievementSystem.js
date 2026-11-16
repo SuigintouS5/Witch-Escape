@@ -228,7 +228,7 @@ export const INITIAL_ACHIEVEMENTS = [
     reward: { type: 'exp_bonus', value: 0.02, percent: 2, desc: '✨ +2% EXP Vĩnh Viễn' }
   },
   {
-    id: 'read_35_books',
+    id: 'read_49_books',
     name: 'Kho Tàng Nhân Loại',
     icon: '📜',
     category: 'collection',

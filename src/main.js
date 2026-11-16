@@ -1794,7 +1794,7 @@ class Game {
           this.experienceGems.push(new ExperienceGem(killedEnemy.x, killedEnemy.y, xpVal));
 
           // Tỷ lệ rơi Cục Máu từ quái thường:
-          // 0.5% (0.005) rơi Cục Máu Nhỏ (+40 HP)
+          // 0.5% (0.005) rơi Cục Máu Nhỏ (+400 HP)
           // 0.1% (0.001) rơi Cục Máu Lớn (+70% Max HP)
           const roll = Math.random();
           if (roll < 0.001) {
@@ -2117,7 +2117,7 @@ class Game {
 
       // Tỷ lệ rơi từ thùng gỗ:
       // 70% Đá Kinh Nghiệm
-      // 20% Cục Máu Nhỏ (+40 HP)
+      // 20% Cục Máu Nhỏ (+400 HP)
       // 10% Cục Máu Lớn (+70% Max HP)
       const roll = Math.random();
       if (roll < 0.70) {

@@ -1,15 +1,15 @@
 // =========================================================================
 // HỆ THỐNG ĐẠI TÁC PHẨM (BOOK SYSTEM / CLASSIC CODEX)
-// Quản lý 35 cuốn sách triết học & văn học kinh điển, cơ chế tiến hóa rẽ nhánh,
+// Quản lý 49 cuốn sách triết học & văn học kinh điển, cơ chế tiến hóa rẽ nhánh,
 // hợp thể thần thoại, điều kiện ẩn, và Thư Viện Sách (Codex).
 // =========================================================================
 
 export const BOOK_CODEX_SAVE_KEY = 'vampire_survival_book_codex_v1';
 
-// Định nghĩa toàn bộ 35 cuốn sách với tên tác phẩm chuẩn ngôn ngữ gốc
+// Định nghĩa toàn bộ 49 cuốn sách với tên tác phẩm chuẩn ngôn ngữ gốc
 export const BOOK_DEFINITIONS = {
   // =========================================================================
-  // 1. TÁM CUỐN BẬC KHỞI ĐẦU (STARTER BOOKS)
+  // 1. MƯỜI MỘT CUỐN BẬC KHỞI ĐẦU (STARTER BOOKS)
   // =========================================================================
   freud: {
     id: 'freud',
@@ -289,8 +289,7 @@ export const BOOK_DEFINITIONS = {
     tier: 'special',
     year: '1776',
     desc: 'Khai thông kinh tế: Tăng +40% Tiền Vàng và x1.2 toàn bộ Vàng nhận được sau trận.',
-    buffs: { goldMult: 0.40, goldMultiplierFinal: 1.20 },
-    buffs: { goldMultiplierFinal: 1.20 }
+    buffs: { goldMult: 0.40, goldMultiplierFinal: 1.20 }
   },
   dante: {
     id: 'dante',

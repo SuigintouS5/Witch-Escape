@@ -2350,7 +2350,7 @@ export class VolcanicNeedleVolleyWeapon {
 
 export class WeaponManager {
   constructor(initialWeaponId = 'main_sword') {
-    // 4 slot tấn công tối đa
+    // 5 slot tấn công tối đa
     this.equippedWeapons = [];
     this.initStartingWeapon(initialWeaponId);
   }

@@ -27,7 +27,7 @@ export class Spawner {
   recalculateRates() {
     let rateMult = (this.diff && this.diff.spawnRateMult) || 1.0;
     if (this.challenges.enemy_count_x4) {
-      rateMult *= 3.5; // Quái đông gấp 4 lần
+      rateMult *= 3.5; // Thử thách Biển Quái (Tần suất spawn tăng 3.5 lần)
     }
     this.baseInterval = 1.25 / rateMult;
     this.minInterval = 0.28 / rateMult;

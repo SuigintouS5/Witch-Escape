@@ -1,5 +1,5 @@
 // Lớp vật phẩm Cục Máu Rơi (HealthDrop)
-// Loại 'small': Hồi 40 máu cố định, bình thuốc đỏ nhỏ
+// Loại 'small': Hồi 400 máu cố định, bình thuốc đỏ nhỏ
 // Loại 'large': Hồi 70% Max HP, trái tim tinh thể ma thuật hoàng gia tỏa sáng
 
 export class HealthDrop {

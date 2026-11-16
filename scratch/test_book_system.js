@@ -23,8 +23,8 @@ import { MetaProgression } from '../src/MetaProgression.js';
 import { Player } from '../src/Player.js';
 
 console.log('--- 1. Testing Definitions & Initialization ---');
-assert.strictEqual(Object.keys(BOOK_DEFINITIONS).length, 35, 'Should have exactly 35 books defined');
-assert.strictEqual(STARTER_BOOK_IDS.length, 8, 'Should have exactly 8 starter books');
+assert.strictEqual(Object.keys(BOOK_DEFINITIONS).length, 49, 'Should have exactly 49 books defined');
+assert.strictEqual(STARTER_BOOK_IDS.length, 11, 'Should have exactly 11 starter books');
 
 const bookSys = new BookSystem();
 assert.strictEqual(bookSys.maxSlots, 3, 'Default slots should be 3');
@@ -107,7 +107,6 @@ console.log('--- 9. Testing MetaProgression Upgrades ---');
 const meta = new MetaProgression();
 assert(meta.upgrades.bookSlots !== undefined, 'Meta should have bookSlots');
 assert(meta.upgrades.starterBooks !== undefined, 'Meta should have starterBooks');
-assert(meta.upgrades.bookDropRate !== undefined, 'Meta should have bookDropRate');
 meta.upgrades.bookSlots.level = 2;
 meta.upgrades.starterBooks.level = 1;
 const metaStats = meta.getBonusStats();

@@ -1,6 +1,6 @@
 // Lớp Thùng Gỗ Phá Vỡ (Crate)
 // Rải rác khắp bản đồ với số lượng giới hạn và KHÔNG respawn khi đã vỡ
-// Đánh vỡ rơi: 70% Đá Kinh Nghiệm, 20% Cục Máu Nhỏ (+40 HP), 10% Cục Máu Lớn (+70% Max HP)
+// Đánh vỡ rơi: 70% Đá Kinh Nghiệm, 20% Cục Máu Nhỏ (+400 HP), 10% Cục Máu Lớn (+70% Max HP)
 
 export class Crate {
   constructor(x, y) {

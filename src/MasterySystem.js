@@ -243,8 +243,8 @@ export const CHARACTER_SPECIAL_MASTERY = {
   },
   dark_knight: {
     name: 'Khí Phách Hắc Ám',
-    desc: 'Phản đòn thêm +150 cố định và +10 Giáp cứng mỗi cấp; khi đứng yên tăng thêm +15% sát thương đòn đánh.',
-    format: (lvl) => `Phản đòn +${lvl * 150}, Giáp cứng +${lvl * 10}, +15% dmg khi đứng yên.`
+    desc: 'Phản đòn thêm +150 cố định và +10 Giáp cứng mỗi cấp; khi đứng yên tăng thêm +20% sát thương đòn đánh.',
+    format: (lvl) => `Phản đòn +${lvl * 150}, Giáp cứng +${lvl * 10}, +20% dmg khi đứng yên.`
   },
   high_mage: {
     name: 'Bão Tố Nguyên Thủy',

@@ -48,7 +48,7 @@ export class Player {
     const armorPct = (metaBonuses && metaBonuses.armorPercentBonus) ? metaBonuses.armorPercentBonus : 0;
     this.armor = Math.round(baseArm * (1.0 + armorPct));
 
-    // Hệ số Giảm Sát Thương % (độc lập với Giáp, tối đa 50%)
+    // Hệ số Giảm Sát Thương % (độc lập với Giáp, tối đa 50% từ Base/Shop/Mastery, tối đa 75% khi cộng dồn với Sách Tri Thức)
     const metaDR = (metaBonuses && metaBonuses.damageReduction) ? metaBonuses.damageReduction : 0;
     this.damageReduction = Math.min(0.50, (this.masteryBonuses.damageReduction || 0) + metaDR);
 
