@@ -1194,14 +1194,19 @@ class Game {
     if (this.isEvolutionOpen) {
       const b = this.evolutionBtnRect;
       if (mouseX >= b.x && mouseX <= b.x + b.w && mouseY >= b.y && mouseY <= b.y + b.h) {
-        // Thực hiện hợp nhất 2 vũ khí Cấp 7
-        this.upgradeManager.executeEvolution();
+        // Thực hiện hợp nhất 2 vũ khí Cấp 7 thành vũ khí tối thượng
+        const evoResult = this.upgradeManager.executeEvolution();
         if (this.achievementSystem) {
           this.achievementSystem.track('evolved_weapons', 1);
         }
 
-        this.particles.createArcaneBlast(this.player.x, this.player.y, 3.5);
-        this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 80);
+        if (evoResult && typeof this.showGameToast === 'function') {
+          this.showGameToast(`⚡ HỢP THỂ THÀNH CÔNG: ${evoResult.name}! (Giải phóng 1 ô vũ khí)`, '#fbbf24');
+        }
+
+        this.particles.createArcaneBlast(this.player.x, this.player.y, 4.5);
+        this.particles.createDeathBurst(this.player.x, this.player.y, '#ffd700', 90);
+        this.particles.createDeathBurst(this.player.x, this.player.y, '#ff4500', 60);
         this.isEvolutionOpen = false;
         this.checkPendingModals();
       }
@@ -2956,57 +2961,127 @@ class Game {
   renderEvolutionModal() {
     this.ctx.save();
 
-    this.ctx.fillStyle = 'rgba(15, 8, 2, 0.92)';
+    // Lấy thông tin về công thức hợp thể sắp diễn ra hoặc vừa diễn ra
+    if (!this.upgradeManager.pendingEvolutionPlan) {
+      this.upgradeManager.checkEvolutionReadiness();
+    }
+    const plan = this.upgradeManager.pendingEvolutionPlan;
+    const evoInfo = this.upgradeManager.lastEvolutionInfo || (plan ? {
+      name: plan.recipe.name,
+      title: plan.recipe.title,
+      desc: plan.recipe.desc,
+      ingredient1: plan.w1.name,
+      ingredient2: plan.w2.name
+    } : {
+      name: '⭐ BÃO KIẾM HUYỀN BƯỚM ⭐',
+      title: 'HỢP NHẤT: BÃO KIẾM HUYỀN BƯỚM',
+      desc: 'Tăng +120% Sát thương toàn bộ vũ khí, giảm -35% hồi chiêu, và phát nổ kiếm ánh sáng ma thuật quét sạch bản đồ!',
+      ingredient1: 'Vũ Khí Phụ 1',
+      ingredient2: 'Vũ Khí Phụ 2'
+    });
+
+    this.ctx.fillStyle = 'rgba(10, 6, 18, 0.94)';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const panelW = 820;
-    const panelH = 500;
+    const panelW = 900;
+    const panelH = 540;
     const panelX = this.canvas.width / 2 - panelW / 2;
     const panelY = this.canvas.height / 2 - panelH / 2;
 
-    this.ctx.fillStyle = 'rgba(30, 20, 10, 0.96)';
+    // Nền bảng ma thuật huyền bí
+    this.ctx.fillStyle = 'rgba(25, 16, 38, 0.98)';
     this.ctx.fillRect(panelX, panelY, panelW, panelH);
     this.ctx.strokeStyle = '#ffd700';
     this.ctx.lineWidth = 3.5;
     this.ctx.strokeRect(panelX, panelY, panelW, panelH);
 
+    // Tiêu đề
     this.ctx.fillStyle = '#ffd700';
-    this.ctx.font = 'bold 44px "Segoe UI", serif';
+    this.ctx.font = 'bold 38px "Nunito", "Be Vietnam Pro", sans-serif';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText('TIẾN HÓA VŨ KHÍ TỐI THƯỢNG!', this.canvas.width / 2, panelY + 80);
+    this.ctx.shadowColor = '#eab308';
+    this.ctx.shadowBlur = 16;
+    this.ctx.fillText('⚡ TIẾN HÓA VŨ KHÍ TỐI THƯỢNG ⚡', this.canvas.width / 2, panelY + 68);
+    this.ctx.shadowBlur = 0;
 
-    this.ctx.fillStyle = '#ffecb3';
-    this.ctx.font = '22px sans-serif';
-    this.ctx.fillText('Bạn đã thu thập Lõi Tiến Hóa khi có 2 Vũ Khí Phụ Max Cấp 7!', this.canvas.width / 2, panelY + 135);
+    // Phụ đề
+    this.ctx.fillStyle = '#e2e8f0';
+    this.ctx.font = 'bold 16px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('Đã thu thập Lõi Tiến Hóa từ 2 Vũ Khí Phụ đạt Max Cấp 7!', this.canvas.width / 2, panelY + 104);
 
-    this.ctx.fillStyle = '#ff88aa';
-    this.ctx.font = 'bold 26px "Segoe UI", sans-serif';
-    this.ctx.fillText('⭐ HỢP NHẤT: BÃO KIẾM HUYỀN BƯỚM ⭐', this.canvas.width / 2, panelY + 195);
+    // Box hiển thị công thức hợp thể
+    const boxW = panelW - 80;
+    const boxH = 90;
+    const boxX = panelX + 40;
+    const boxY = panelY + 124;
+
+    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    this.ctx.fillRect(boxX, boxY, boxW, boxH);
+    this.ctx.strokeStyle = '#6366f1';
+    this.ctx.lineWidth = 2.0;
+    this.ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = 'bold 14px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('NGUYÊN LIỆU HỢP NHẤT (DUNG HỢP):', this.canvas.width / 2, boxY + 28);
 
     this.ctx.fillStyle = '#38bdf8';
-    this.ctx.font = 'italic 16px sans-serif';
-    this.ctx.fillText('🛡️ Vũ khí chính độc nhất được bảo toàn vĩnh viễn (không bị tiêu hao).', this.canvas.width / 2, panelY + 230);
+    this.ctx.font = 'bold 18px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText(`⚔️ ${evoInfo.ingredient1 || 'Vũ Khí 1'} (Max Lv.7)   ➕   ⚔️ ${evoInfo.ingredient2 || 'Vũ Khí 2'} (Max Lv.7)`, this.canvas.width / 2, boxY + 62);
 
+    // Tên Vũ Khí Tối Thượng
+    this.ctx.fillStyle = '#fde047';
+    this.ctx.font = 'bold 28px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.shadowColor = '#f59e0b';
+    this.ctx.shadowBlur = 14;
+    this.ctx.fillText(evoInfo.name, this.canvas.width / 2, panelY + 258);
+    this.ctx.shadowBlur = 0;
+
+    // Chú thích giải phóng slot
+    this.ctx.fillStyle = '#4ade80';
+    this.ctx.font = 'bold 15px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('✨ Dung hợp 2 vũ khí thành 1 siêu vũ khí & GIẢI PHÓNG 1 Ô TẤN CÔNG MỚI!', this.canvas.width / 2, panelY + 292);
+
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = 'italic 14px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('🛡️ Vũ khí chính độc nhất của nhân vật được bảo toàn vĩnh viễn (không bị tiêu hao).', this.canvas.width / 2, panelY + 316);
+
+    // Mô tả chi tiết sức mạnh
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = '19px sans-serif';
-    this.ctx.fillText('Tăng +120% Sát thương toàn bộ vũ khí, giảm -35% hồi chiêu,', this.canvas.width / 2, panelY + 268);
-    this.ctx.fillText('và phát nổ kiếm ánh sáng ma thuật liên tục quét sạch bản đồ!', this.canvas.width / 2, panelY + 298);
+    this.ctx.font = '16px "Nunito", "Be Vietnam Pro", sans-serif';
 
+    // Tự ngắt dòng mô tả
+    const words = (evoInfo.desc || '').split(' ');
+    let line1 = '';
+    let line2 = '';
+    for (let i = 0; i < words.length; i++) {
+      if (line1.length < 52) {
+        line1 += (line1 ? ' ' : '') + words[i];
+      } else {
+        line2 += (line2 ? ' ' : '') + words[i];
+      }
+    }
+    this.ctx.fillText(line1, this.canvas.width / 2, panelY + 360);
+    if (line2) {
+      this.ctx.fillText(line2, this.canvas.width / 2, panelY + 386);
+    }
+
+    // Nút Bấm Kích Hoạt
     const b = this.evolutionBtnRect;
-    b.x = this.canvas.width / 2 - 180;
-    b.y = panelY + 360;
-    b.w = 360;
-    b.h = 64;
+    b.w = 380;
+    b.h = 60;
+    b.x = this.canvas.width / 2 - b.w / 2;
+    b.y = panelY + panelH - 85;
 
-    this.ctx.fillStyle = '#d4af37';
+    this.ctx.fillStyle = '#d97706';
     this.ctx.fillRect(b.x, b.y, b.w, b.h);
-    this.ctx.strokeStyle = '#fff0a6';
+    this.ctx.strokeStyle = '#fde047';
     this.ctx.lineWidth = 2.5;
     this.ctx.strokeRect(b.x, b.y, b.w, b.h);
 
-    this.ctx.fillStyle = '#1a1005';
-    this.ctx.font = 'bold 22px sans-serif';
-    this.ctx.fillText('KÍCH HOẠT TIẾN HÓA', this.canvas.width / 2, b.y + 40);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 22px "Nunito", "Be Vietnam Pro", sans-serif';
+    this.ctx.fillText('🔥 KÍCH HOẠT TIẾN HÓA 🔥', this.canvas.width / 2, b.y + 38);
 
     this.ctx.restore();
   }

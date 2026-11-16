@@ -7,9 +7,63 @@ import {
   BoomerangWeapon,
   ArcSlashWeapon,
   EvolvedStormSwordWeapon,
+  InfernalMagmaMaelstromWeapon,
+  JudgmentHolyRayWeapon,
+  TempestPhantomNeedlesWeapon,
+  OmniBladeSovereignWeapon,
+  VolcanicNeedleVolleyWeapon,
   createWeaponById,
   WEAPON_UPGRADE_DETAILS
 } from './Weapon.js';
+
+// Danh sách công thức Hợp Thể Tối Thượng Của Vũ Khí (Weapon Fusion Recipes)
+export const WEAPON_FUSION_RECIPES = [
+  {
+    ingredients: ['orbiting_blades', 'pool_zone'],
+    resultClass: InfernalMagmaMaelstromWeapon,
+    resultId: 'infernal_magma_maelstrom',
+    name: '🔥 VÒNG XOÁY DUNG NHAM DIỆT THẾ',
+    title: 'HỢP NHẤT: VÒNG XOÁY DUNG NHAM DIỆT THẾ',
+    desc: '8 đại đao dung nham xoay quanh, để lại vệt lửa nóng chảy và phát nổ sóng chấn hút quái mỗi 3 giây.',
+    icon: 'assets/icons/pool_zone.png'
+  },
+  {
+    ingredients: ['holy_aura', 'arc_slash'],
+    resultClass: JudgmentHolyRayWeapon,
+    resultId: 'judgment_holy_ray',
+    name: '✨ THÁNH QUANG TRẢM LONG',
+    title: 'HỢP NHẤT: THÁNH QUANG TRẢM LONG',
+    desc: 'Vùng thánh địa rộng gấp đôi, liên tục hồi Máu Ảo và phóng 4 luồng trảm kích ánh sáng làm chậm 35%.',
+    icon: 'assets/icons/holy_aura.png'
+  },
+  {
+    ingredients: ['piercing_needle', 'boomerang'],
+    resultClass: TempestPhantomNeedlesWeapon,
+    resultId: 'tempest_phantom_needles',
+    name: '🌪️ VŨ ĐIỆU BÃO KIM BÁC SƯƠNG',
+    title: 'HỢP NHẤT: VŨ ĐIỆU BÃO KIM BÁC SƯƠNG',
+    desc: 'Bắn chùm phi kim xoáy ốc xuyên thấu vô hạn gây chảy máu, nổ thành 6 phi đao khi gặp Boss.',
+    icon: 'assets/icons/needle.png'
+  },
+  {
+    ingredients: ['arc_slash', 'orbiting_blades'],
+    resultClass: OmniBladeSovereignWeapon,
+    resultId: 'omni_blade_sovereign',
+    name: '⚔️ VẠN KIẾM QUY TÔNG',
+    title: 'HỢP NHẤT: VẠN KIẾM QUY TÔNG',
+    desc: '12 kiếm khí thần thoại: 6 kiếm phản đòn hộ thân, 6 kiếm phóng trảm kích càn quét và kích hoạt kiếm trận cận chiến.',
+    icon: 'assets/icons/cleave.png'
+  },
+  {
+    ingredients: ['piercing_needle', 'pool_zone'],
+    resultClass: VolcanicNeedleVolleyWeapon,
+    resultId: 'volcanic_needle_volley',
+    name: '🌋 MƯA TIỄN HỎA SƠN',
+    title: 'HỢP NHẤT: MƯA TIỄN HỎA SƠN',
+    desc: 'Xả mưa hỏa tiễn nung đỏ liên hoàn, kích hoạt cột lửa hỏa sơn phun trào hất tung quái và thiêu đốt diện rộng.',
+    icon: 'assets/icons/pool_zone.png'
+  }
+];
 
 export class UpgradeManager {
   constructor(weaponManager, skillManager) {
@@ -57,6 +111,8 @@ export class UpgradeManager {
     // Trạng thái Tiến Hóa Vũ Khí (Evolutions)
     this.canEvolve = false;
     this.availableEvolutions = [];
+    this.pendingEvolutionPlan = null;
+    this.lastEvolutionInfo = null;
 
     // Trạng thái Khóa Ô ngẫu nhiên trong 10s (Skill 7 của Chúa Tể Yuki)
     this.tempLockedSlot = null; // { category, id, name, timer, maxDuration }
@@ -368,46 +424,95 @@ export class UpgradeManager {
 
   // Kiểm tra điều kiện Tiến Hóa: Khi có 2 vũ khí phụ (không tính Vũ Khí Chính độc nhất) đạt Cấp 7
   checkEvolutionReadiness() {
-    const fusibleMaxedWeapons = this.attackSlots.filter(w => w.level >= 7 && !w.isMainWeapon && !w.isUnique && w.id !== 'evolved_storm_sword');
-    if (fusibleMaxedWeapons.length >= 2) {
-      this.canEvolve = true;
-      return true;
+    const candidates = [];
+    for (let i = 0; i < this.attackSlots.length; i++) {
+      const w = this.attackSlots[i];
+      if (w.level >= 7 && !w.isMainWeapon && !w.isUnique && !w.isEvolved) {
+        candidates.push({ weapon: w, index: i });
+      }
     }
-    this.canEvolve = false;
-    return false;
+
+    if (candidates.length < 2) {
+      this.canEvolve = false;
+      this.pendingEvolutionPlan = null;
+      return false;
+    }
+
+    // 1. Ưu tiên tìm cặp khớp với công thức cụ thể trong WEAPON_FUSION_RECIPES
+    for (const recipe of WEAPON_FUSION_RECIPES) {
+      const [reqA, reqB] = recipe.ingredients;
+      let candA = null;
+      let candB = null;
+
+      for (const c of candidates) {
+        if (!candA && c.weapon.id === reqA) candA = c;
+        else if (!candB && c.weapon.id === reqB) candB = c;
+      }
+
+      if (candA && candB && candA.index !== candB.index) {
+        this.canEvolve = true;
+        this.pendingEvolutionPlan = {
+          recipe,
+          idx1: Math.min(candA.index, candB.index),
+          idx2: Math.max(candA.index, candB.index),
+          w1: candA.weapon,
+          w2: candB.weapon
+        };
+        return true;
+      }
+    }
+
+    // 2. Nếu không khớp công thức đặc thù, fallback sang Bão Kiếm Huyền Bướm với 2 ứng viên đầu tiên
+    const c1 = candidates[0];
+    const c2 = candidates[1];
+    this.canEvolve = true;
+    this.pendingEvolutionPlan = {
+      recipe: {
+        resultClass: EvolvedStormSwordWeapon,
+        resultId: 'evolved_storm_sword',
+        name: '⭐ BÃO KIẾM HUYỀN BƯỚM ⭐',
+        title: 'HỢP NHẤT: BÃO KIẾM HUYỀN BƯỚM',
+        desc: 'Hợp thể 2 vũ khí phụ max cấp. Tăng +120% Sát thương toàn bộ vũ khí, giảm -35% hồi chiêu, và phát nổ kiếm ánh sáng ma thuật quét sạch bản đồ!',
+        icon: 'assets/icons/evolved_storm_sword.png'
+      },
+      idx1: Math.min(c1.index, c2.index),
+      idx2: Math.max(c1.index, c2.index),
+      w1: c1.weapon,
+      w2: c2.weapon
+    };
+    return true;
   }
 
   // Hợp nhất 2 vũ khí phụ Cấp 7 thành 1 vũ khí tối thượng, rút bớt 1 ô vũ khí (Bảo toàn 100% vũ khí chính độc nhất)
   executeEvolution() {
-    const maxedIndices = [];
-    for (let i = 0; i < this.attackSlots.length; i++) {
-      const w = this.attackSlots[i];
-      if (w.level >= 7 && !w.isMainWeapon && !w.isUnique && w.id !== 'evolved_storm_sword') {
-        maxedIndices.push(i);
-        if (maxedIndices.length === 2) break;
-      }
+    if (!this.checkEvolutionReadiness() || !this.pendingEvolutionPlan) {
+      return null;
     }
 
-    if (maxedIndices.length >= 2) {
-      const idx1 = maxedIndices[0];
-      const idx2 = maxedIndices[1];
+    const plan = this.pendingEvolutionPlan;
+    const evolvedWeapon = new plan.recipe.resultClass();
 
-      // Tạo vũ khí tối thượng
-      const evolvedWeapon = new EvolvedStormSwordWeapon();
+    // Thay thế ô vũ khí 1 bằng vũ khí tối thượng
+    this.attackSlots[plan.idx1] = evolvedWeapon;
 
-      // Thay thế ô vũ khí 1 bằng vũ khí tối thượng
-      this.attackSlots[idx1] = evolvedWeapon;
+    // Xóa bỏ ô vũ khí 2 (rút bớt 1 ô vũ khí, giải phóng chỗ trống cho slot tấn công tiếp theo)
+    this.attackSlots.splice(plan.idx2, 1);
 
-      // Xóa bỏ ô vũ khí 2 (rút bớt 1 ô vũ khí, giải phóng chỗ trống cho slot tấn công)
-      this.attackSlots.splice(idx2, 1);
+    this.canEvolve = false;
+    this.lastEvolutionInfo = {
+      name: plan.recipe.name,
+      title: plan.recipe.title,
+      desc: plan.recipe.desc,
+      icon: plan.recipe.icon,
+      ingredient1: plan.w1.name,
+      ingredient2: plan.w2.name
+    };
+    this.pendingEvolutionPlan = null;
 
-      this.canEvolve = false;
-      if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
-        window.__gameInstance.achievementSystem.track('evolved_weapons', 1);
-      }
-      return true;
+    if (typeof window !== 'undefined' && window.__gameInstance && window.__gameInstance.achievementSystem) {
+      window.__gameInstance.achievementSystem.track('evolved_weapons', 1);
     }
-    return false;
+    return this.lastEvolutionInfo;
   }
 
   // Tính toán chỉ số phòng thủ
@@ -452,7 +557,7 @@ export class UpgradeManager {
       while (w.level < wData.level) {
         w.upgrade();
       }
-      if (i === 0 && w.id !== 'evolved_storm_sword') {
+      if (i === 0 && !w.isEvolved && w.id !== 'evolved_storm_sword') {
         w.isMainWeapon = true;
         w.isUnique = true;
       }

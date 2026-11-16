@@ -1247,6 +1247,7 @@ export class EvolvedStormSwordWeapon {
     this.level = 7;
     this.maxLevel = 7;
     this.type = 'attack';
+    this.isEvolved = true;
 
     this.damage = 1200;
     this.cooldown = 0.45;
@@ -1361,6 +1362,992 @@ export class EvolvedStormSwordWeapon {
 // =========================================================================
 // BỘ QUẢN LÝ TỔNG HỢP TOÀN BỘ VŨ KHÍ (WEAPON MANAGER)
 // =========================================================================
+
+// =========================================================================
+// 1. HỢP THỂ TỐI THƯỢNG: VÒNG XOÁY DUNG NHAM DIỆT THẾ (INFERNAL MAGMA MAELSTROM)
+// Công thức: Orbiting Blades (Cấp 7) + Pool Zone (Cấp 7)
+// =========================================================================
+export class InfernalMagmaMaelstromWeapon {
+  constructor() {
+    this.id = 'infernal_magma_maelstrom';
+    this.name = '🔥 Vòng Xoáy Dung Nham Diệt Thế';
+    this.icon = 'assets/icons/pool_zone.png';
+    this.desc = '8 đại đao dung nham xoay quanh, để lại vệt lửa nóng chảy và phát nổ sóng chấn hút quái mỗi 3 giây.';
+    this.level = 7;
+    this.maxLevel = 7;
+    this.type = 'attack';
+    this.isEvolved = true;
+    this.isEvolved = true;
+
+    this.damage = 1100;
+    this.bladeCount = 8;
+    this.angle = 0;
+    this.radius = 175;
+    this.hitCooldowns = new Map();
+    this.pulseCooldown = 3.0;
+    this.pulseTimer = 2.0;
+    this.activePools = [];
+  }
+
+  upgrade() {}
+
+  update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    this.angle += delta * 6.0;
+    this.pulseTimer -= delta;
+
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
+    const bladeHitbox = 54 * areaMult;
+
+    // 1. Quét kiếm xoay xung quanh
+    for (const [enemy, timer] of this.hitCooldowns.entries()) {
+      if (timer - delta <= 0) this.hitCooldowns.delete(enemy);
+      else this.hitCooldowns.set(enemy, timer - delta);
+    }
+
+    for (let i = 0; i < this.bladeCount; i++) {
+      const a = this.angle + (i * Math.PI * 2) / this.bladeCount;
+      const bx = player.x + Math.cos(a) * curOrbitRadius;
+      const by = player.y + Math.sin(a) * curOrbitRadius;
+
+      for (const e of enemies) {
+        if (e.isDead || this.hitCooldowns.has(e)) continue;
+        const d = Math.hypot(bx - e.x, by - e.y);
+        if (d <= bladeHitbox + e.getHitboxRadius()) {
+          const rawDmg = this.damage * dmgMult;
+          const rolled = player.rollDamage ? player.rollDamage(rawDmg, true) : { damage: rawDmg, isCrit: false, isTrueDamage: true };
+          const hit = e.takeDamage(rolled.damage, {
+            isTrueDamage: true,
+            attackerAccuracy: rolled.accuracy,
+            isCrit: rolled.isCrit
+          }, particles);
+
+          if (hit > 0) {
+            particles.createHitSparks(bx, by, rolled.critTier >= 2 ? 24 : (rolled.isCrit ? 16 : 10));
+            particles.createDamageNumber(e.x, e.y, hit, rolled.isCrit, true, false, false, '#ff6600', rolled.critTier);
+            if (player.onHitEnemy) player.onHitEnemy(e, hit, particles);
+
+            // 40% tỉ lệ rơi vũng dung nham nóng chảy tại điểm chém
+            if (Math.random() < 0.40 && this.activePools.length < 14) {
+              this.activePools.push({
+                x: e.x,
+                y: e.y,
+                radius: Math.round(55 * areaMult),
+                duration: 3.5,
+                tickTimer: 0.25,
+                damage: Math.round(280 * dmgMult)
+              });
+            }
+          }
+          this.hitCooldowns.set(e, 0.22);
+          if (e.isDead && onEnemyKill) onEnemyKill(e);
+        }
+      }
+    }
+
+    // 2. Cập nhật các vũng dung nham rơi ra từ kiếm
+    for (let i = this.activePools.length - 1; i >= 0; i--) {
+      const pool = this.activePools[i];
+      pool.duration -= delta;
+      pool.tickTimer -= delta;
+
+      if (pool.duration <= 0) {
+        this.activePools.splice(i, 1);
+        continue;
+      }
+
+      if (pool.tickTimer <= 0) {
+        pool.tickTimer = 0.25;
+        for (const e of enemies) {
+          if (e.isDead) continue;
+          const d = Math.hypot(e.x - pool.x, e.y - pool.y);
+          if (d <= pool.radius + e.getHitboxRadius()) {
+            const hit = e.takeDamage(pool.damage, { isTrueDamage: true }, particles);
+            if (hit > 0) {
+              particles.createDamageNumber(e.x, e.y - 12, hit, false, true, false, false, '#ff4500');
+              if (e.isDead && onEnemyKill) onEnemyKill(e);
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Sóng chấn dung nham phát nổ mỗi 3 giây (Hút quái vào tâm)
+    if (this.pulseTimer <= 0) {
+      this.pulseTimer = this.pulseCooldown;
+      const pulseRadius = 550 * areaMult;
+
+      if (particles) {
+        particles.createArcaneBlast(player.x, player.y, 4.0);
+        particles.createHitSparks(player.x, player.y, 35);
+      }
+
+      for (const e of enemies) {
+        if (e.isDead) continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        if (d <= pulseRadius) {
+          const pulseDmg = Math.round(1500 * dmgMult);
+          const hit = e.takeDamage(pulseDmg, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createDamageNumber(e.x, e.y, hit, true, true, false, false, '#ff2200');
+            // Hút nhẹ quái vào tâm
+            const pullFactor = 0.18;
+            e.x += (player.x - e.x) * pullFactor;
+            e.y += (player.y - e.y) * pullFactor;
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+        }
+      }
+    }
+  }
+
+  render(ctx, camera, player) {
+    if (player.isDead) return;
+
+    // 1. Vẽ các vũng dung nham
+    for (const pool of this.activePools) {
+      const sp = camera.worldToScreen(pool.x, pool.y);
+      if (sp.x < -100 || sp.x > camera.viewportWidth + 100 || sp.y < -100 || sp.y > camera.viewportHeight + 100) continue;
+
+      ctx.save();
+      const alpha = Math.min(1.0, pool.duration / 0.5) * 0.75;
+      const grad = ctx.createRadialGradient(sp.x, sp.y, 4, sp.x, sp.y, pool.radius);
+      grad.addColorStop(0, `rgba(255, 230, 0, ${alpha})`);
+      grad.addColorStop(0.5, `rgba(255, 80, 0, ${alpha * 0.85})`);
+      grad.addColorStop(1, `rgba(180, 20, 0, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, pool.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 2. Vẽ 8 đại đao dung nham xoay quanh
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const curOrbitRadius = this.radius * (1 + (areaMult - 1) * 0.35);
+    const bladeImg = getWeaponSprite('assets/weapons/axe_fire_single.png') || getWeaponSprite('assets/weapons/sword_serrated_single.png');
+    const drawW = 44 * areaMult;
+    const drawH = 92 * areaMult;
+
+    ctx.save();
+    for (let i = 0; i < this.bladeCount; i++) {
+      const a = this.angle + (i * Math.PI * 2) / this.bladeCount;
+      const wx = player.x + Math.cos(a) * curOrbitRadius;
+      const wy = player.y + Math.sin(a) * curOrbitRadius;
+      const sp = camera.worldToScreen(wx, wy);
+
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(a + Math.PI / 2);
+
+      ctx.shadowColor = '#ff4500';
+      ctx.shadowBlur = 18;
+
+      if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
+        ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+      } else {
+        ctx.fillStyle = '#ff5500';
+        ctx.fillRect(-drawW / 2, -drawH / 2, drawW, drawH);
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+}
+
+// =========================================================================
+// 2. HỢP THỂ TỐI THƯỢNG: THÁNH QUANG TRẢM LONG (JUDGMENT HOLY RAY)
+// Công thức: Holy Aura (Cấp 7) + Arc Slash (Cấp 7)
+// =========================================================================
+export class JudgmentHolyRayWeapon {
+  constructor() {
+    this.id = 'judgment_holy_ray';
+    this.name = '✨ Thánh Quang Trảm Long';
+    this.icon = 'assets/icons/holy_aura.png';
+    this.desc = 'Hào quang thánh địa cực đại, liên tục hồi Máu Ảo và phóng 4 luồng trảm kích ánh sáng làm chậm 35%.';
+    this.level = 7;
+    this.maxLevel = 7;
+    this.type = 'attack';
+    this.isEvolved = true;
+    this.isEvolved = true;
+
+    this.radius = 240;
+    this.damage = 380;
+    this.tickTimer = 0.4;
+    this.slashCooldown = 1.0;
+    this.slashTimer = 0.5;
+    this.shieldRegenTimer = 0.8;
+    this.activeRays = [];
+    this.auraAngle = 0;
+  }
+
+  upgrade() {}
+
+  update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    this.tickTimer -= delta;
+    this.slashTimer -= delta;
+    this.shieldRegenTimer -= delta;
+    this.auraAngle += delta * 1.8;
+
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const effectiveRadius = this.radius * areaMult;
+
+    // 1. Tự động hồi Máu Ảo mỗi 0.8s
+    if (this.shieldRegenTimer <= 0) {
+      this.shieldRegenTimer = 0.8;
+      if (player && typeof player.addShield === 'function') {
+        player.addShield(35);
+      }
+    }
+
+    // 2. Hào quang Thánh Địa gây sát thương & làm chậm quái
+    if (this.tickTimer <= 0) {
+      this.tickTimer = 0.4;
+      for (const e of enemies) {
+        if (e.isDead) continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        if (d <= effectiveRadius) {
+          const rawDmg = this.damage * dmgMult;
+          const hit = e.takeDamage(rawDmg, { isTrueDamage: false }, particles);
+          if (hit > 0) {
+            particles.createDamageNumber(e.x, e.y - 10, hit, false, false, false, false, '#fef08a');
+            if (e.slowTimer !== undefined) {
+              e.slowTimer = 2.0;
+              e.slowMult = 0.65; // Giảm 35% tốc độ
+            }
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+        }
+      }
+    }
+
+    // 3. Phóng 4 luồng Trảm Kích Ánh Sáng về 4 hướng
+    if (this.slashTimer <= 0) {
+      this.slashTimer = this.slashCooldown;
+      const baseAngle = this.auraAngle;
+      for (let i = 0; i < 4; i++) {
+        const ang = baseAngle + (i * Math.PI / 2);
+        this.activeRays.push({
+          x: player.x,
+          y: player.y,
+          vx: Math.cos(ang) * 580,
+          vy: Math.sin(ang) * 580,
+          distTraveled: 0,
+          maxDist: 650 * areaMult,
+          radius: 36 * areaMult,
+          angle: ang,
+          hitEnemies: new Set(),
+          damage: Math.round(1250 * dmgMult)
+        });
+      }
+    }
+
+    // 4. Cập nhật các luồng trảm kích ánh sáng
+    for (let i = this.activeRays.length - 1; i >= 0; i--) {
+      const r = this.activeRays[i];
+      const step = Math.hypot(r.vx * delta, r.vy * delta);
+      r.x += r.vx * delta;
+      r.y += r.vy * delta;
+      r.distTraveled += step;
+
+      if (r.distTraveled >= r.maxDist) {
+        this.activeRays.splice(i, 1);
+        continue;
+      }
+
+      for (const e of enemies) {
+        if (e.isDead || r.hitEnemies.has(e)) continue;
+        const d = Math.hypot(e.x - r.x, e.y - r.y);
+        if (d <= r.radius + e.getHitboxRadius()) {
+          r.hitEnemies.add(e);
+          const hit = e.takeDamage(r.damage, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(e.x, e.y, 16);
+            particles.createDamageNumber(e.x, e.y - 20, hit, true, true, false, false, '#38bdf8');
+            if (e.slowTimer !== undefined) {
+              e.slowTimer = 3.0;
+              e.slowMult = 0.65;
+            }
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+        }
+      }
+    }
+  }
+
+  render(ctx, camera, player) {
+    if (player.isDead) return;
+    const sp = camera.worldToScreen(player.x, player.y);
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const effRadius = this.radius * areaMult;
+
+    ctx.save();
+
+    // 1. Vầng hào quang thánh điện tỏa sáng
+    const grad = ctx.createRadialGradient(sp.x, sp.y, 20, sp.x, sp.y, effRadius);
+    grad.addColorStop(0, 'rgba(254, 240, 138, 0.45)');
+    grad.addColorStop(0.7, 'rgba(250, 204, 21, 0.25)');
+    grad.addColorStop(1, 'rgba(234, 179, 8, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, effRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Viền phát sáng xoay tròn
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 3.0;
+    ctx.shadowColor = '#eab308';
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, effRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 2. Vẽ 4 luồng Trảm Kích Ánh Sáng đang bay
+    for (const r of this.activeRays) {
+      const rsp = camera.worldToScreen(r.x, r.y);
+      ctx.save();
+      ctx.translate(rsp.x, rsp.y);
+      ctx.rotate(r.angle);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 18;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, r.radius, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.arc(-r.radius * 0.5, 0, r.radius * 0.8, Math.PI * 0.4, -Math.PI * 0.4, true);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+}
+
+// =========================================================================
+// 3. HỢP THỂ TỐI THƯỢNG: VŨ ĐIỆU BÃO KIM BÁC SƯƠNG (TEMPEST PHANTOM NEEDLES)
+// Công thức: Piercing Needle (Cấp 7) + Boomerang (Cấp 7)
+// =========================================================================
+export class TempestPhantomNeedlesWeapon {
+  constructor() {
+    this.id = 'tempest_phantom_needles';
+    this.name = '🌪️ Vũ Điệu Bão Kim Bác Sương';
+    this.icon = 'assets/icons/needle.png';
+    this.desc = 'Bắn chùm phi kim xoáy ốc xuyên thấu vô hạn gây chảy máu, nổ thành 6 phi đao khi gặp Boss.';
+    this.level = 7;
+    this.maxLevel = 7;
+    this.type = 'attack';
+    this.isEvolved = true;
+    this.isEvolved = true;
+
+    this.cooldown = 1.2;
+    this.timer = 0.2;
+    this.damage = 580;
+    this.activeNeedles = [];
+    this.activeDaggers = [];
+  }
+
+  upgrade() {}
+
+  update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    this.timer -= delta;
+
+    // 1. Phóng chùm 6 phi kim xoáy ốc
+    if (this.timer <= 0) {
+      this.timer = this.cooldown;
+      const count = 6;
+      for (let i = 0; i < count; i++) {
+        const ang = (Math.PI * 2 / count) * i;
+        this.activeNeedles.push({
+          x: player.x,
+          y: player.y,
+          startX: player.x,
+          startY: player.y,
+          angle: ang,
+          distTraveled: 0,
+          maxDist: 440,
+          state: 'outgoing', // outgoing -> returning
+          damage: Math.round(this.damage * dmgMult),
+          hitCooldownMap: new Map(),
+          rot: 0
+        });
+      }
+    }
+
+    // 2. Cập nhật các phi kim xoắn ốc hồi chuyển
+    for (let i = this.activeNeedles.length - 1; i >= 0; i--) {
+      const n = this.activeNeedles[i];
+      n.rot += delta * 18;
+
+      // Giảm hit cooldown
+      for (const [e, cd] of n.hitCooldownMap.entries()) {
+        if (cd - delta <= 0) n.hitCooldownMap.delete(e);
+        else n.hitCooldownMap.set(e, cd - delta);
+      }
+
+      if (n.state === 'outgoing') {
+        n.angle += delta * 2.8; // Quỹ đạo xoáy ốc
+        const speed = 520;
+        n.x += Math.cos(n.angle) * speed * delta;
+        n.y += Math.sin(n.angle) * speed * delta;
+        n.distTraveled += speed * delta;
+
+        if (n.distTraveled >= n.maxDist) {
+          n.state = 'returning';
+        }
+      } else {
+        const dx = player.x - n.x;
+        const dy = player.y - n.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 40) {
+          this.activeNeedles.splice(i, 1);
+          continue;
+        }
+        const speed = 640;
+        n.x += (dx / dist) * speed * delta;
+        n.y += (dy / dist) * speed * delta;
+      }
+
+      // Va chạm quái
+      for (const e of enemies) {
+        if (e.isDead || n.hitCooldownMap.has(e)) continue;
+        const d = Math.hypot(e.x - n.x, e.y - n.y);
+        if (d <= 28 + e.getHitboxRadius()) {
+          n.hitCooldownMap.set(e, 0.25);
+          const hit = e.takeDamage(n.damage, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(n.x, n.y, 12);
+            particles.createDamageNumber(e.x, e.y, hit, false, true, false, false, '#a855f7');
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+
+            // Gặp Mini Boss hoặc Boss: Nổ tung thành 6 phi đao truy tìm mục tiêu
+            if ((e.isMiniBoss || e.isMainBoss || e.isFinalBoss) && this.activeDaggers.length < 24) {
+              for (let k = 0; k < 6; k++) {
+                const dagAng = (Math.PI * 2 / 6) * k + Math.random() * 0.4;
+                this.activeDaggers.push({
+                  x: n.x,
+                  y: n.y,
+                  vx: Math.cos(dagAng) * 600,
+                  vy: Math.sin(dagAng) * 600,
+                  lifetime: 1.2,
+                  damage: Math.round(420 * dmgMult),
+                  targetEnemy: null
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Cập nhật phi đao ma thuật nổ ra
+    for (let i = this.activeDaggers.length - 1; i >= 0; i--) {
+      const d = this.activeDaggers[i];
+      d.lifetime -= delta;
+      if (d.lifetime <= 0) {
+        this.activeDaggers.splice(i, 1);
+        continue;
+      }
+
+      // Homing nhẹ về quái gần nhất
+      if (!d.targetEnemy || d.targetEnemy.isDead) {
+        let minDist = 350;
+        for (const e of enemies) {
+          if (e.isDead) continue;
+          const dist = Math.hypot(e.x - d.x, e.y - d.y);
+          if (dist < minDist) {
+            minDist = dist;
+            d.targetEnemy = e;
+          }
+        }
+      }
+
+      if (d.targetEnemy && !d.targetEnemy.isDead) {
+        const tdx = d.targetEnemy.x - d.x;
+        const tdy = d.targetEnemy.y - d.y;
+        const tdist = Math.hypot(tdx, tdy) || 1;
+        d.vx += (tdx / tdist) * 850 * delta;
+        d.vy += (tdy / tdist) * 850 * delta;
+      }
+
+      d.x += d.vx * delta;
+      d.y += d.vy * delta;
+
+      for (const e of enemies) {
+        if (e.isDead) continue;
+        const dist = Math.hypot(e.x - d.x, e.y - d.y);
+        if (dist <= 18 + e.getHitboxRadius()) {
+          const hit = e.takeDamage(d.damage, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(d.x, d.y, 8);
+            particles.createDamageNumber(e.x, e.y, hit, false, true, false, false, '#c084fc');
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+          this.activeDaggers.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  render(ctx, camera, player) {
+    if (player.isDead) return;
+
+    ctx.save();
+    // 1. Vẽ các phi kim xoắn ốc
+    for (const n of this.activeNeedles) {
+      const sp = camera.worldToScreen(n.x, n.y);
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(n.rot);
+
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 12;
+
+      ctx.fillStyle = '#e879f9';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 20, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 12, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 2. Vẽ phi đao nổ ra
+    for (const d of this.activeDaggers) {
+      const sp = camera.worldToScreen(d.x, d.y);
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(Math.atan2(d.vy, d.vx));
+
+      ctx.fillStyle = '#a855f7';
+      ctx.fillRect(-8, -2, 16, 4);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+}
+
+// =========================================================================
+// 4. HỢP THỂ TỐI THƯỢNG: VẠN KIẾM QUY TÔNG (OMNI BLADE SOVEREIGN)
+// Công thức: Arc Slash (Cấp 7) + Orbiting Blades (Cấp 7)
+// =========================================================================
+export class OmniBladeSovereignWeapon {
+  constructor() {
+    this.id = 'omni_blade_sovereign';
+    this.name = '⚔️ Vạn Kiếm Quy Tông';
+    this.icon = 'assets/icons/cleave.png';
+    this.desc = '12 kiếm khí thần thoại: 6 kiếm phản đòn hộ thân, 6 kiếm phóng trảm kích càn quét và kích hoạt kiếm trận cận chiến.';
+    this.level = 7;
+    this.maxLevel = 7;
+    this.type = 'attack';
+    this.isEvolved = true;
+    this.isEvolved = true;
+
+    this.innerAngle = 0;
+    this.outerAngle = 0;
+    this.innerRadius = 135;
+    this.outerRadius = 185;
+    this.damage = 1200;
+    this.launchCooldown = 1.4;
+    this.launchTimer = 0.5;
+    this.activeLaunches = [];
+    this.spatialComboCooldown = 0.6;
+    this.spatialComboTimer = 0;
+    this.hitCooldowns = new Map();
+  }
+
+  upgrade() {}
+
+  update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    this.innerAngle += delta * 5.0;
+    this.outerAngle -= delta * 3.5;
+    this.launchTimer -= delta;
+    this.spatialComboTimer -= delta;
+
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const innerR = this.innerRadius * areaMult;
+
+    // 1. Vòng trong 6 kiếm phản đòn hộ thân
+    for (const [enemy, timer] of this.hitCooldowns.entries()) {
+      if (timer - delta <= 0) this.hitCooldowns.delete(enemy);
+      else this.hitCooldowns.set(enemy, timer - delta);
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const a = this.innerAngle + (i * Math.PI * 2) / 6;
+      const bx = player.x + Math.cos(a) * innerR;
+      const by = player.y + Math.sin(a) * innerR;
+
+      for (const e of enemies) {
+        if (e.isDead || this.hitCooldowns.has(e)) continue;
+        const d = Math.hypot(bx - e.x, by - e.y);
+        if (d <= 45 * areaMult + e.getHitboxRadius()) {
+          const rawDmg = this.damage * dmgMult;
+          const hit = e.takeDamage(rawDmg, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(bx, by, 14);
+            particles.createDamageNumber(e.x, e.y, hit, true, true, false, false, '#38bdf8');
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+          this.hitCooldowns.set(e, 0.20);
+        }
+      }
+    }
+
+    // 2. Vòng ngoài: Cứ 1.4s phóng 6 thanh kiếm lao về phía trước càn quét
+    if (this.launchTimer <= 0) {
+      this.launchTimer = this.launchCooldown;
+      const move = player.isMoving ? { x: player.facingRight ? 1 : -1, y: 0 } : { x: 1, y: 0 };
+      const baseAng = Math.atan2(move.y, move.x);
+
+      for (let i = 0; i < 6; i++) {
+        const spread = ((i - 2.5) / 5) * 0.75;
+        const ang = baseAng + spread;
+        this.activeLaunches.push({
+          x: player.x,
+          y: player.y,
+          vx: Math.cos(ang) * 720,
+          vy: Math.sin(ang) * 720,
+          distTraveled: 0,
+          maxDist: 620 * areaMult,
+          angle: ang,
+          damage: Math.round(1050 * dmgMult),
+          hitEnemies: new Set()
+        });
+      }
+    }
+
+    // Cập nhật các kiếm phóng ra
+    for (let i = this.activeLaunches.length - 1; i >= 0; i--) {
+      const sw = this.activeLaunches[i];
+      const step = Math.hypot(sw.vx * delta, sw.vy * delta);
+      sw.x += sw.vx * delta;
+      sw.y += sw.vy * delta;
+      sw.distTraveled += step;
+
+      if (sw.distTraveled >= sw.maxDist) {
+        this.activeLaunches.splice(i, 1);
+        continue;
+      }
+
+      for (const e of enemies) {
+        if (e.isDead || sw.hitEnemies.has(e)) continue;
+        const d = Math.hypot(e.x - sw.x, e.y - sw.y);
+        if (d <= 35 + e.getHitboxRadius()) {
+          sw.hitEnemies.add(e);
+          const hit = e.takeDamage(sw.damage, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(sw.x, sw.y, 16);
+            particles.createDamageNumber(e.x, e.y, hit, true, true, false, false, '#60a5fa');
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+        }
+      }
+    }
+
+    // 3. Kiếm trận cận chiến: Khi quái vào trong bán kính 130px, tự chém liên hoàn 3 nhát
+    if (this.spatialComboTimer <= 0) {
+      let hasNearby = false;
+      for (const e of enemies) {
+        if (!e.isDead && Math.hypot(e.x - player.x, e.y - player.y) <= 130) {
+          hasNearby = true;
+          break;
+        }
+      }
+      if (hasNearby) {
+        this.spatialComboTimer = this.spatialComboCooldown;
+        if (particles) {
+          particles.createArcaneBlast(player.x, player.y, 2.5);
+          particles.createHitSparks(player.x, player.y, 25);
+        }
+        for (const e of enemies) {
+          if (e.isDead) continue;
+          if (Math.hypot(e.x - player.x, e.y - player.y) <= 160 * areaMult) {
+            const comboDmg = Math.round(1350 * dmgMult);
+            const hit = e.takeDamage(comboDmg, { isTrueDamage: true }, particles);
+            if (hit > 0) {
+              particles.createDamageNumber(e.x, e.y - 15, hit, true, true, false, false, '#f43f5e');
+              if (e.isDead && onEnemyKill) onEnemyKill(e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  render(ctx, camera, player) {
+    if (player.isDead) return;
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+    const innerR = this.innerRadius * areaMult;
+    const outerR = this.outerRadius * areaMult;
+    const bladeImg = getWeaponSprite('assets/weapons/sword_serrated_single.png');
+    const drawW = 34 * areaMult;
+    const drawH = 85 * areaMult;
+
+    ctx.save();
+
+    // 1. Vẽ vòng trong 6 kiếm hộ thân
+    for (let i = 0; i < 6; i++) {
+      const a = this.innerAngle + (i * Math.PI * 2) / 6;
+      const wx = player.x + Math.cos(a) * innerR;
+      const wy = player.y + Math.sin(a) * innerR;
+      const sp = camera.worldToScreen(wx, wy);
+
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(a + Math.PI / 2);
+
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 14;
+
+      if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
+        ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+      } else {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(-drawW / 2, -drawH / 2, drawW, drawH);
+      }
+      ctx.restore();
+    }
+
+    // 2. Vẽ vòng ngoài 6 kiếm hư ảnh
+    for (let i = 0; i < 6; i++) {
+      const a = this.outerAngle + (i * Math.PI * 2) / 6;
+      const wx = player.x + Math.cos(a) * outerR;
+      const wy = player.y + Math.sin(a) * outerR;
+      const sp = camera.worldToScreen(wx, wy);
+
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(a + Math.PI / 2);
+
+      ctx.shadowColor = '#818cf8';
+      ctx.shadowBlur = 12;
+
+      ctx.globalAlpha = 0.65;
+      if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
+        ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+      } else {
+        ctx.fillStyle = '#818cf8';
+        ctx.fillRect(-drawW / 2, -drawH / 2, drawW, drawH);
+      }
+      ctx.restore();
+    }
+
+    // 3. Vẽ các kiếm đang phóng ra
+    for (const sw of this.activeLaunches) {
+      const sp = camera.worldToScreen(sw.x, sw.y);
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(sw.angle + Math.PI / 2);
+
+      ctx.shadowColor = '#60a5fa';
+      ctx.shadowBlur = 16;
+      if (bladeImg && bladeImg.complete && bladeImg.naturalWidth > 0) {
+        ctx.drawImage(bladeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+      } else {
+        ctx.fillStyle = '#60a5fa';
+        ctx.fillRect(-drawW / 2, -drawH / 2, drawW, drawH);
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+}
+
+// =========================================================================
+// 5. HỢP THỂ TỐI THƯỢNG: MƯA TIỄN HỎA SƠN (VOLCANIC NEEDLE VOLLEY)
+// Công thức: Piercing Needle (Cấp 7) + Pool Zone (Cấp 7)
+// =========================================================================
+export class VolcanicNeedleVolleyWeapon {
+  constructor() {
+    this.id = 'volcanic_needle_volley';
+    this.name = '🌋 Mưa Tiễn Hỏa Sơn';
+    this.icon = 'assets/icons/pool_zone.png';
+    this.desc = 'Xả mưa hỏa tiễn nung đỏ, kích hoạt cột lửa hỏa sơn phun trào hất tung quái và thiêu đốt diện rộng.';
+    this.level = 7;
+    this.maxLevel = 7;
+    this.type = 'attack';
+    this.isEvolved = true;
+    this.isEvolved = true;
+
+    this.cooldown = 0.9;
+    this.timer = 0.3;
+    this.needleCount = 8;
+    this.damage = 620;
+    this.activeVolleyNeedles = [];
+    this.activeGeysers = [];
+  }
+
+  upgrade() {}
+
+  update(delta, player, enemies, spawnProjCb, particles, dmgMult, onEnemyKill) {
+    this.timer -= delta;
+    const areaMult = (player && player.getAreaMultiplier) ? player.getAreaMultiplier() : 1.0;
+
+    // 1. Bắn loạt mưa 8 hỏa tiễn nung đỏ
+    if (this.timer <= 0) {
+      this.timer = this.cooldown;
+      if (enemies.length > 0) {
+        for (let i = 0; i < this.needleCount; i++) {
+          const target = enemies[Math.floor(Math.random() * enemies.length)];
+          if (!target || target.isDead) continue;
+
+          const dx = target.x - player.x + (Math.random() - 0.5) * 60;
+          const dy = target.y - player.y + (Math.random() - 0.5) * 60;
+          const dist = Math.hypot(dx, dy) || 1;
+          const speed = 760;
+
+          this.activeVolleyNeedles.push({
+            x: player.x,
+            y: player.y,
+            vx: (dx / dist) * speed,
+            vy: (dy / dist) * speed,
+            distTraveled: 0,
+            maxDist: 680 * areaMult,
+            pierceCount: 3,
+            hitEnemies: new Set(),
+            damage: Math.round(this.damage * dmgMult)
+          });
+        }
+      }
+    }
+
+    // 2. Cập nhật các hỏa tiễn
+    for (let i = this.activeVolleyNeedles.length - 1; i >= 0; i--) {
+      const n = this.activeVolleyNeedles[i];
+      const step = Math.hypot(n.vx * delta, n.vy * delta);
+      n.x += n.vx * delta;
+      n.y += n.vy * delta;
+      n.distTraveled += step;
+
+      let shouldErupt = false;
+      let eruptX = n.x;
+      let eruptY = n.y;
+
+      for (const e of enemies) {
+        if (e.isDead || n.hitEnemies.has(e)) continue;
+        const d = Math.hypot(e.x - n.x, e.y - n.y);
+        if (d <= 22 + e.getHitboxRadius()) {
+          n.hitEnemies.add(e);
+          n.pierceCount--;
+          const hit = e.takeDamage(n.damage, { isTrueDamage: true }, particles);
+          if (hit > 0) {
+            particles.createHitSparks(n.x, n.y, 10);
+            particles.createDamageNumber(e.x, e.y, hit, true, true, false, false, '#f97316');
+            if (e.isDead && onEnemyKill) onEnemyKill(e);
+          }
+
+          if (n.pierceCount <= 0) {
+            shouldErupt = true;
+            eruptX = e.x;
+            eruptY = e.y;
+            break;
+          }
+        }
+      }
+
+      if (n.distTraveled >= n.maxDist || shouldErupt) {
+        // Kích hoạt Cột Lửa Hỏa Sơn tại điểm kết thúc
+        if (this.activeGeysers.length < 16) {
+          this.activeGeysers.push({
+            x: eruptX,
+            y: eruptY,
+            radius: Math.round(65 * areaMult),
+            duration: 2.5,
+            tickTimer: 0.25,
+            damage: Math.round(240 * dmgMult)
+          });
+        }
+        this.activeVolleyNeedles.splice(i, 1);
+      }
+    }
+
+    // 3. Cập nhật các cột lửa Hỏa Sơn phun trào
+    for (let i = this.activeGeysers.length - 1; i >= 0; i--) {
+      const g = this.activeGeysers[i];
+      g.duration -= delta;
+      g.tickTimer -= delta;
+
+      if (g.duration <= 0) {
+        this.activeGeysers.splice(i, 1);
+        continue;
+      }
+
+      if (g.tickTimer <= 0) {
+        g.tickTimer = 0.25;
+        for (const e of enemies) {
+          if (e.isDead) continue;
+          const d = Math.hypot(e.x - g.x, e.y - g.y);
+          if (d <= g.radius + e.getHitboxRadius()) {
+            const hit = e.takeDamage(g.damage, { isTrueDamage: true }, particles);
+            if (hit > 0) {
+              particles.createDamageNumber(e.x, e.y - 12, hit, false, true, false, false, '#ea580c');
+              // Đẩy lùi nhẹ
+              const kx = (e.x - g.x);
+              const ky = (e.y - g.y);
+              const kdist = Math.hypot(kx, ky) || 1;
+              e.x += (kx / kdist) * 16;
+              e.y += (ky / kdist) * 16;
+              if (e.isDead && onEnemyKill) onEnemyKill(e);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  render(ctx, camera, player) {
+    if (player.isDead) return;
+
+    ctx.save();
+
+    // 1. Vẽ các cột lửa Hỏa Sơn
+    for (const g of this.activeGeysers) {
+      const sp = camera.worldToScreen(g.x, g.y);
+      if (sp.x < -100 || sp.x > camera.viewportWidth + 100 || sp.y < -100 || sp.y > camera.viewportHeight + 100) continue;
+
+      const alpha = Math.min(1.0, g.duration / 0.5) * 0.8;
+      const grad = ctx.createRadialGradient(sp.x, sp.y, 4, sp.x, sp.y, g.radius);
+      grad.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
+      grad.addColorStop(0.4, `rgba(249, 115, 22, ${alpha * 0.9})`);
+      grad.addColorStop(1, `rgba(185, 28, 28, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, g.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 2. Vẽ các hỏa tiễn đang bay
+    for (const n of this.activeVolleyNeedles) {
+      const sp = camera.worldToScreen(n.x, n.y);
+      ctx.save();
+      ctx.translate(sp.x, sp.y);
+      ctx.rotate(Math.atan2(n.vy, n.vx));
+
+      ctx.shadowColor = '#ea580c';
+      ctx.shadowBlur = 14;
+
+      ctx.fillStyle = '#ffedd5';
+      ctx.fillRect(-16, -3, 32, 6);
+
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(-22, -2, 10, 4);
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+}
+
 export class WeaponManager {
   constructor(initialWeaponId = 'main_sword') {
     // 4 slot tấn công tối đa
@@ -1435,6 +2422,11 @@ export function createWeaponById(id) {
     case 'boomerang': return new BoomerangWeapon();
     case 'arc_slash': return new ArcSlashWeapon();
     case 'evolved_storm_sword': return new EvolvedStormSwordWeapon();
+    case 'infernal_magma_maelstrom': return new InfernalMagmaMaelstromWeapon();
+    case 'judgment_holy_ray': return new JudgmentHolyRayWeapon();
+    case 'tempest_phantom_needles': return new TempestPhantomNeedlesWeapon();
+    case 'omni_blade_sovereign': return new OmniBladeSovereignWeapon();
+    case 'volcanic_needle_volley': return new VolcanicNeedleVolleyWeapon();
     default: return new MainSwordWeapon();
   }
 }
