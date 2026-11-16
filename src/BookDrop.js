@@ -24,33 +24,41 @@ export class BookDrop {
     const dy = player.y - this.y;
     const dist = Math.hypot(dx, dy);
 
-    // Kích hoạt hút khi người chơi đến gần
+    // Kích hoạt hút khi người chơi đến gần VÀ KHO SÁCH CÒN CHỖ TRỐNG
+    const canPickUp = bookSystem && bookSystem.canPickUpMore();
     const magnetRadius = (player.pickupRangeBonus || 0) + 120;
-    if (!this.isAttracted && dist <= magnetRadius) {
+
+    if (!this.isAttracted && dist <= magnetRadius && canPickUp) {
       this.isAttracted = true;
     }
 
     if (this.isAttracted) {
-      this.attractSpeed = Math.min(this.maxSpeed, this.attractSpeed + delta * 800);
-      const moveDist = this.attractSpeed * delta;
-
-      if (dist <= Math.max(20, moveDist)) {
-        // Chỉ nhặt được nếu kho sách còn chỗ trống
-        if (bookSystem && bookSystem.canPickUpMore()) {
-          this.isDead = true;
-          bookSystem.addBook(this.bookId);
-          if (onCollect) {
-            onCollect(this.bookId, this.bookDef);
-          }
-        }
+      // Nếu trong lúc đang hút mà kho sách bị đầy (không còn slot nhặt)
+      if (!canPickUp) {
+        this.isAttracted = false;
+        this.attractSpeed = 140; // Trả về tốc độ ban đầu
       } else {
-        this.x += (dx / dist) * moveDist;
-        this.y += (dy / dist) * moveDist;
+        this.attractSpeed = Math.min(this.maxSpeed, this.attractSpeed + delta * 800);
+        const moveDist = this.attractSpeed * delta;
+
+        if (dist <= Math.max(20, moveDist)) {
+          // Chỉ nhặt được nếu kho sách còn chỗ trống
+          if (bookSystem && bookSystem.canPickUpMore()) {
+            this.isDead = true;
+            bookSystem.addBook(this.bookId);
+            if (onCollect) {
+              onCollect(this.bookId, this.bookDef);
+            }
+          }
+        } else {
+          this.x += (dx / dist) * moveDist;
+          this.y += (dy / dist) * moveDist;
+        }
       }
     }
   }
 
-  render(ctx, camera) {
+  render(ctx, camera, bookSystem = null) {
     if (this.isDead) return;
 
     const screenPos = camera.worldToScreen(this.x, this.y);
@@ -115,22 +123,25 @@ export class BookDrop {
 
     ctx.restore();
 
-    // 3. Nhãn tên tác phẩm lơ lửng phía trên
+    // 3. Nhãn tên tác phẩm lơ lửng phía trên (hiển thị KHO ĐẦY nếu người chơi không còn chỗ chứa)
     const title = this.bookDef ? this.bookDef.work : 'Tác Phẩm';
+    const isFull = bookSystem && !bookSystem.canPickUpMore();
+    const displayTag = isFull ? `${title} (KHO ĐẦY)` : title;
+
     ctx.font = 'bold 11px serif';
-    const textWidth = ctx.measureText(title).width;
+    const textWidth = ctx.measureText(displayTag).width;
     const tagW = Math.max(80, textWidth + 16);
     const tagH = 18;
 
-    ctx.fillStyle = 'rgba(25, 20, 15, 0.85)';
+    ctx.fillStyle = isFull ? 'rgba(40, 15, 10, 0.90)' : 'rgba(25, 20, 15, 0.85)';
     ctx.fillRect(screenPos.x - tagW / 2, drawY - 30, tagW, tagH);
-    ctx.strokeStyle = '#d4af37';
+    ctx.strokeStyle = isFull ? '#f87171' : '#d4af37';
     ctx.lineWidth = 1;
     ctx.strokeRect(screenPos.x - tagW / 2, drawY - 30, tagW, tagH);
 
-    ctx.fillStyle = '#fdfbf7';
+    ctx.fillStyle = isFull ? '#fca5a5' : '#fdfbf7';
     ctx.textAlign = 'center';
-    ctx.fillText(title, screenPos.x, drawY - 17);
+    ctx.fillText(displayTag, screenPos.x, drawY - 17);
 
     ctx.restore();
   }

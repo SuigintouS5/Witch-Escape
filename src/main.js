@@ -1816,9 +1816,10 @@ class Game {
           this.bookSystem.bramNoHitTimer = 0; // Đánh trúng/tiêu diệt quái -> reset Cơn Khát Máu Dracula
           this.bookSystem.onEnemyKilled(killedEnemy, killedEnemy.isMiniBoss, killedEnemy.isMainBoss);
 
-          // Rơi Sách Khởi Đầu nếu kho sách còn ô trống và không bật Thử Thách Cấm Sách
-          if (!this.selectedChallenges.no_books && this.bookSystem.canPickUpMore()) {
-            const unownedStarters = STARTER_BOOK_IDS.filter(id => !this.bookSystem.hasBook(id));
+          // Rơi Sách Khởi Đầu nếu kho sách còn ô trống (chưa đầy và chưa có drop đang chờ trên đất) và không bật Thử Thách Cấm Sách
+          const availableBookSlots = this.bookSystem.maxSlots - this.bookSystem.activeBooks.length - this.bookDrops.length;
+          if (!this.selectedChallenges.no_books && availableBookSlots > 0) {
+            const unownedStarters = STARTER_BOOK_IDS.filter(id => !this.bookSystem.hasBook(id) && !this.bookDrops.some(d => d.bookId === id));
             if (unownedStarters.length > 0) {
               const metaDropMult = (this.meta.upgrades.bookDropRate ? (1.0 + this.meta.upgrades.bookDropRate.level * 0.25) : 1.0);
               let dropChance = 0;
@@ -2154,7 +2155,7 @@ class Game {
         drop.render(this.ctx, this.camera);
       }
       for (const drop of this.bookDrops) {
-        drop.render(this.ctx, this.camera);
+        drop.render(this.ctx, this.camera, this.bookSystem);
       }
 
       // 3. Depth Sorting 2.5D
